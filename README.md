@@ -1,54 +1,59 @@
 # Flow Image Generator
 
-Este proyecto es una extensión de Chrome desarrollada con [WXT](https://wxt.dev/) y React.
+A Chrome extension built with [WXT](https://wxt.dev/) and React. It reads a scene-based JSON script, sends each image prompt to Google Flow, tracks generation progress, and downloads the resulting images.
 
-## Requisitos Previos
+## Requirements
 
-- Node.js
-- npm o pnpm
+- Node.js (version 22 recommended)
+- npm
 
-## Instalación
-
-Instala las dependencias del proyecto ejecutando:
+## Install dependencies
 
 ```bash
-npm install
-# o
-pnpm install
+npm ci
 ```
 
-## Modo Desarrollo (Dev)
+## Development
 
-Para ejecutar el proyecto en modo de desarrollo y ver los cambios en tiempo real, simplemente ejecuta:
+Start the development browser with hot reload:
 
 ```bash
 npm run dev
-# o
-pnpm run dev
 ```
 
-**¿Qué hace este comando?**
-- Inicia el servidor de desarrollo local con recarga en caliente (Hot Module Replacement).
-- **Abre automáticamente una nueva ventana del navegador** configurada como un perfil de prueba, con tu extensión ya instalada y lista para usarse. 
+WXT opens a dedicated browser profile with the development extension installed. If you close that browser, press `o` and then Enter in the terminal to reopen it.
 
-*Nota: Si cierras el navegador de prueba, puedes presionar `o + enter` en la terminal donde se está ejecutando el script para volver a abrirlo.*
+## Build for Chrome
 
-## Construcción y Carga Manual en Chrome
+Create a production build:
 
-Si deseas compilar la versión final de la extensión o instalarla en tu perfil de Chrome principal:
+```bash
+npm run build
+```
 
-1. Ejecuta el comando de construcción:
+The unpacked extension is generated in `.output/chrome-mv3`.
 
-   ```bash
-   npm run build
-   # o
-   pnpm run build
-   ```
+To install it in Chrome:
 
-2. Esto generará una carpeta llamada `.output/chrome-mv3` (o similar) en la raíz de tu proyecto.
-3. Abre tu navegador Chrome y ve a la dirección: `chrome://extensions/`
-4. Activa el **Modo de desarrollador** (interruptor en la esquina superior derecha).
-5. Haz clic en el botón **Cargar descomprimida** (Load unpacked) en la parte superior izquierda.
-6. Selecciona la carpeta `.output/chrome-mv3` que se acaba de generar.
+1. Open `chrome://extensions/`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select the `.output/chrome-mv3` directory.
 
-¡Listo! La extensión ahora estará instalada en tu navegador principal.
+## Type-check
+
+Run the TypeScript compiler without emitting files:
+
+```bash
+npm run compile
+```
+
+## Using the extension
+
+1. Open Google Flow and enter a project.
+2. Open the Flow Image Generator extension.
+3. Upload a JSON script containing a `scenes` array.
+4. Start generation and monitor each scene in the queue.
+5. Generated images are downloaded automatically when Flow returns the corresponding results.
+
+> Note: Google Flow integration requires an authenticated browser session. Flow's interface and internal response formats may change over time.
