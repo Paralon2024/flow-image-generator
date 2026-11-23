@@ -1,4 +1,5 @@
 export default defineContentScript({
+  registration: 'runtime',
   matches: ['*://*.google.com/*', '*://labs.google/*'],
   world: 'MAIN',
   runAt: 'document_start',
