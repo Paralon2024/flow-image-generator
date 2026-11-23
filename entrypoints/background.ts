@@ -219,12 +219,12 @@ async function processQueue() {
   broadcastQueue();
 
   try {
-    await chrome.scripting.executeScript({
+    const [{ result: editorFound }] = await chrome.scripting.executeScript({
       target: { tabId: activeTabId },
       world: 'MAIN',
       func: (promptText) => {
         const editorDom = document.querySelector<HTMLElement>('[data-slate-editor="true"]');
-        if (!editorDom) return;
+        if (!editorDom) return false;
         editorDom.focus();
 
         const leaf = editorDom.querySelector('[data-slate-leaf="true"]') || editorDom;
@@ -275,14 +275,22 @@ async function processQueue() {
             }
           }
         }, 800);
+
+        // Report whether the editor was found so the background queue can fail
+        // visibly instead of leaving this scene stuck in IN_PROGRESS.
+        return true;
       },
       args: [nextPending.prompt],
     });
 
+    if (!editorFound) {
+      throw new Error('Google Flow prompt editor was not found. Open a Flow project and try again.');
+    }
+
     // Small buffer after injection before allowing another one
     await new Promise(r => setTimeout(r, 2000));
   } catch (e) {
-    console.error('[INJECT] error', e);
+    console.error('[INJECT] failed to send prompt to Google Flow:', e);
     nextPending.status = 'ERROR';
   } finally {
     isInjecting = false;
