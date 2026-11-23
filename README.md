@@ -1,54 +1,89 @@
 # Flow Image Generator
 
-Este proyecto es una extensión de Chrome desarrollada con [WXT](https://wxt.dev/) y React.
+Flow Image Generator is a Chrome extension built with [WXT](https://wxt.dev/) and React. It reads a JSON scene script, sends each scene's image prompt to the Flow interface, tracks generation progress, and downloads the resulting images into organized folders.
 
-## Requisitos Previos
+## Requirements
 
-- Node.js
-- npm o pnpm
+- Node.js (LTS recommended)
+- npm or pnpm
+- Google Chrome
+- Access to the Google Flow website
 
-## Instalación
+## Installation
 
-Instala las dependencias del proyecto ejecutando:
+Clone the repository and install its dependencies:
 
 ```bash
+git clone https://github.com/Paralon2024/flow-image-generator.git
+cd flow-image-generator
 npm install
-# o
-pnpm install
 ```
 
-## Modo Desarrollo (Dev)
+You can use `pnpm install` if you prefer pnpm.
 
-Para ejecutar el proyecto en modo de desarrollo y ver los cambios en tiempo real, simplemente ejecuta:
+## Development
+
+Start the development browser with:
 
 ```bash
 npm run dev
-# o
-pnpm run dev
 ```
 
-**¿Qué hace este comando?**
-- Inicia el servidor de desarrollo local con recarga en caliente (Hot Module Replacement).
-- **Abre automáticamente una nueva ventana del navegador** configurada como un perfil de prueba, con tu extensión ya instalada y lista para usarse. 
+WXT starts a local development server and opens a dedicated browser profile with the extension installed. Changes are reloaded during development.
 
-*Nota: Si cierras el navegador de prueba, puedes presionar `o + enter` en la terminal donde se está ejecutando el script para volver a abrirlo.*
+To reopen the test browser after closing it, press `o` and then Enter in the terminal running the development command.
 
-## Construcción y Carga Manual en Chrome
+## Build for Chrome
 
-Si deseas compilar la versión final de la extensión o instalarla en tu perfil de Chrome principal:
+Create a production build:
 
-1. Ejecuta el comando de construcción:
+```bash
+npm run build
+```
 
-   ```bash
-   npm run build
-   # o
-   pnpm run build
-   ```
+The Chrome extension build is generated in:
 
-2. Esto generará una carpeta llamada `.output/chrome-mv3` (o similar) en la raíz de tu proyecto.
-3. Abre tu navegador Chrome y ve a la dirección: `chrome://extensions/`
-4. Activa el **Modo de desarrollador** (interruptor en la esquina superior derecha).
-5. Haz clic en el botón **Cargar descomprimida** (Load unpacked) en la parte superior izquierda.
-6. Selecciona la carpeta `.output/chrome-mv3` que se acaba de generar.
+```
+.output/chrome-mv3
+```
 
-¡Listo! La extensión ahora estará instalada en tu navegador principal.
+To create a distributable ZIP archive, run:
+
+```bash
+npm run zip
+```
+
+## Load the extension manually
+
+1. Open Chrome and navigate to `chrome://extensions/`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select the `.output/chrome-mv3` directory.
+
+The extension will now appear in Chrome.
+
+## Using the extension
+
+1. Open Google Flow in Chrome.
+2. Click the Flow Image Generator extension icon.
+3. Upload a JSON script containing a top-level `scenes` array.
+4. Each scene must include a `scene_number` and an `image_prompt` object.
+5. Click **Start Generation** and monitor the queue in the popup.
+6. Generated images are downloaded under `Flow_Generations/Scene_XX/`.
+
+See `script.json` for a complete example of the expected JSON structure.
+
+## Available scripts
+
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start the Chrome development environment |
+| `npm run build` | Build the Chrome extension |
+| `npm run zip` | Package the Chrome extension as a ZIP |
+| `npm run compile` | Run the TypeScript compiler checks |
+| `npm run dev:firefox` | Start the Firefox development environment |
+| `npm run build:firefox` | Build the Firefox extension |
+
+## Notes
+
+This project interacts with the Google Flow website. Changes to Flow's interface or internal request format may affect compatibility.
