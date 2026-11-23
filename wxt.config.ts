@@ -4,6 +4,9 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
+    name: 'Flow Image Generator',
+    version: '1.0.0',
+    description: 'Generate images in Google Flow from scene prompts and automatically organize downloads.',
     permissions: ['scripting', 'activeTab', 'downloads']
   }
 });
