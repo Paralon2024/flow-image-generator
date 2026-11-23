@@ -1,5 +1,5 @@
 import { browser } from 'wxt/browser';
-import { QueueItem } from '../utils/types';
+import type { QueueItem } from '../utils/types';
 
 const MAX_CONCURRENT = 3;
 const IMAGES_PER_SCENE = 2;        // Flow generates this many images per prompt

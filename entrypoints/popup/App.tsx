@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import type { ChangeEvent } from 'react';
 import { browser } from 'wxt/browser';
-import { QueueItem, ScriptData, ScriptScene } from '../../utils/types';
+import type { QueueItem, ScriptData } from '../../utils/types';
 import { parseImagePromptToText } from '../../utils/parser';
 import './App.css';
 
@@ -28,7 +29,7 @@ function App() {
     };
   }, []);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
