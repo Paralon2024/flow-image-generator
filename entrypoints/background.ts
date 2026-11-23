@@ -23,7 +23,7 @@ export default defineBackground(() => {
   chrome.scripting.registerContentScripts([{
     id: 'flow-injector',
     matches: ['*://*.google.com/*', '*://labs.google/*'],
-    js: ['injector.js'],
+    js: ['content-scripts/injector.js'],
     world: 'MAIN',
     runAt: 'document_start',
   }]).catch(() => {
@@ -31,7 +31,7 @@ export default defineBackground(() => {
     chrome.scripting.updateContentScripts([{
       id: 'flow-injector',
       matches: ['*://*.google.com/*', '*://labs.google/*'],
-      js: ['injector.js'],
+      js: ['content-scripts/injector.js'],
       world: 'MAIN',
       runAt: 'document_start',
     }]).catch(e => console.error('[INJECTOR] update failed:', e));
