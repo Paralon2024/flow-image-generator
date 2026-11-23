@@ -39,7 +39,7 @@ function App() {
       try {
         const json = JSON.parse(event.target?.result as string) as ScriptData;
         if (!json.scenes || !Array.isArray(json.scenes)) {
-          setError('El archivo JSON no tiene el formato esperado (falta el array "scenes").');
+          setError('The JSON file has an invalid format (the "scenes" array is missing).');
           return;
         }
         
@@ -52,7 +52,7 @@ function App() {
         setError('');
       } catch (err) {
         console.error(err);
-        setError('Error al leer el archivo JSON.');
+        setError('Unable to read the JSON file.');
       }
     };
     reader.readAsText(file);
@@ -60,7 +60,7 @@ function App() {
 
   const handleStartQueue = async () => {
     if (parsedScenes.length === 0) {
-      setError('Por favor, sube un archivo JSON primero.');
+      setError('Please upload a JSON file first.');
       return;
     }
 
@@ -83,7 +83,7 @@ function App() {
       // Reset input file value if needed, but react handles it okay if re-mounted
     } catch (err) {
       console.error(err);
-      setError('Error al comunicar con la extensión.');
+      setError('Unable to communicate with the extension.');
     }
   };
 
@@ -123,7 +123,7 @@ function App() {
       
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px dashed #dadce0' }}>
         <p style={{ margin: 0, fontSize: '12px', color: '#5f6368', fontWeight: '500' }}>
-          1. Sube tu archivo script.json
+          1. Upload your script.json file
         </p>
         <input 
           type="file" 
@@ -134,7 +134,7 @@ function App() {
         
         {parsedScenes.length > 0 && (
           <div style={{ fontSize: '12px', color: '#1e8e3e', fontWeight: 'bold' }}>
-            ✓ Archivo cargado: {fileName} ({parsedScenes.length} escenas detectadas)
+            ✓ File loaded: {fileName} ({parsedScenes.length} scenes detected)
           </div>
         )}
 
@@ -154,7 +154,7 @@ function App() {
               transition: 'background-color 0.2s'
             }}
           >
-            Iniciar Generación
+            Start Generation
           </button>
           
           <button 
@@ -169,7 +169,7 @@ function App() {
               fontWeight: '500'
             }}
           >
-            Limpiar Cola
+            Clear Queue
           </button>
         </div>
       </div>
@@ -180,11 +180,11 @@ function App() {
         </p>
       )}
 
-      {/* Barra de Progreso */}
+      {/* Progress Bar */}
       {totalItems > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#5f6368', fontWeight: 'bold' }}>
-            <span>Progreso General</span>
+            <span>Overall Progress</span>
             <span>{downloadedItems} / {totalItems} ({progressPercent}%)</span>
           </div>
           <div style={{ height: '8px', width: '100%', backgroundColor: '#e8eaed', borderRadius: '4px', overflow: 'hidden' }}>
@@ -193,12 +193,12 @@ function App() {
         </div>
       )}
 
-      {/* Cola de Trabajo */}
+      {/* Processing Queue */}
       <div style={{ borderTop: '1px solid #eee', paddingTop: '12px' }}>
-        <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#3c4043' }}>Detalle de Escenas</h3>
+        <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#3c4043' }}>Scene Details</h3>
         
         {queue.length === 0 ? (
-          <p style={{ fontSize: '12px', color: '#9aa0a6', fontStyle: 'italic' }}>No hay escenas en procesamiento.</p>
+          <p style={{ fontSize: '12px', color: '#9aa0a6', fontStyle: 'italic' }}>No scenes are currently being processed.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '250px', overflowY: 'auto' }}>
             {queue.map((item) => (
@@ -217,7 +217,7 @@ function App() {
                 <span title={item.status} style={{ marginTop: '2px' }}>{getStatusIcon(item.status)}</span>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <span style={{ fontSize: '11px', color: '#5f6368', fontWeight: 'bold' }}>
-                    Escena {item.scene_number} - {item.status}
+                    Scene {item.scene_number} - {item.status}
                   </span>
                   <span style={{ 
                     fontSize: '11px', 
