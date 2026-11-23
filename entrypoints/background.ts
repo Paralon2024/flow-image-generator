@@ -389,7 +389,7 @@ function startPollingIfNeeded() {
 
         browser.downloads.download({
           url: imgUrl,
-          filename: `Flow_Generations/Escena_${paddedScene}/imagen_${mapping.imageIndex}.png`,
+          filename: `Flow_Generations/Scene_${paddedScene}/image_${mapping.imageIndex}.png`,
           saveAs: false,
         }).catch(err => console.error('[DOWNLOAD] error', err));
 
