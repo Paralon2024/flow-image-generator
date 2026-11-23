@@ -38,3 +38,4 @@ jobs:
           name: flow-image-generator-chrome
           path: .output/*.zip
           if-no-files-found: error
+          include-hidden-files: true
