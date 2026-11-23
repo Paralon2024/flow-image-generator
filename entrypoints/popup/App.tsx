@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { browser } from 'wxt/browser';
-import { QueueItem, ScriptData, ScriptScene } from '../../utils/types';
+import type { QueueItem, ScriptData, ScriptScene } from '../../utils/types';
 import { parseImagePromptToText } from '../../utils/parser';
 import './App.css';
 
