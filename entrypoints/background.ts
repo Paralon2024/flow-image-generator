@@ -329,12 +329,14 @@ async function processQueue() {
             imageToggle.querySelector<HTMLButtonElement>('button')?.click();
             await wait(300);
           }
-          const modelNames: Record<string, string> = {
-            'nano-banana-pro': 'Nano Banana Pro',
-            'nano-banana-2': 'Nano Banana 2.1',
-            'nano-banana-2-lite': 'Nano Banana 2 Lite',
+          const modelNames: Record<string, string[]> = {
+            'nano-banana-pro': ['Nano Banana Pro'],
+            // Some Flow accounts still label the same model "Nano Banana 2".
+            'nano-banana-2': ['Nano Banana 2.1', 'Nano Banana 2'],
+            'nano-banana-2-lite': ['Nano Banana 2 Lite'],
           };
-          const requestedModel = modelNames[imageModel] || modelNames['nano-banana-pro'];
+          const requestedModels = modelNames[imageModel] || modelNames['nano-banana-pro'];
+          const requestedModel = requestedModels[0];
           const modelTrigger = settingsPanel.querySelector<HTMLButtonElement>(
             'button:has(span.model-select-trigger-content), button.image-model-picker-button'
           );
@@ -345,11 +347,14 @@ async function processQueue() {
           if (!activeModel.toLowerCase().includes(requestedModel.toLowerCase())) {
             modelTrigger.click();
             await wait(350);
-            const modelOption = Array.from(document.querySelectorAll<HTMLElement>(
+            const modelOptions = Array.from(document.querySelectorAll<HTMLElement>(
               '[role="menuitem"], flow-radio-group label.radio-option'
-            )).find(option =>
-              normalize(option.textContent || '').toLowerCase().includes(requestedModel.toLowerCase())
-            );
+            ));
+            const modelOption = modelOptions.find(option => {
+              const label = normalize(option.textContent || '').toLowerCase();
+              return requestedModels.some(name => label.includes(name.toLowerCase())) &&
+                !(imageModel === 'nano-banana-2' && label.includes('lite'));
+            });
             if (!modelOption) {
               return { success: false, error: requestedModel + ' is not available in this Google Flow account or could not be found in the model menu.' };
             }
@@ -360,8 +365,8 @@ async function processQueue() {
             'flow-prompt-box-settings, flow-settings-view'
           );
           const selectedTrigger = refreshedSettings?.querySelector<HTMLButtonElement>(\n              'button:has(span.model-select-trigger-content), button.image-model-picker-button'\n            );\n            const selectedModel = normalize(selectedTrigger?.textContent || '');
-          if (!selectedModel.toLowerCase().includes(requestedModel.toLowerCase())) {
-            return { success: false, error: 'Google Flow did not confirm the selected model (' + requestedModel + '). No prompt was submitted.' };
+          if (!requestedModels.some(name => selectedModel.toLowerCase().includes(name.toLowerCase()))) {
+            return { success: false, error: 'Google Flow did not confirm the selected model (' + requestedModels.join(' / ') + '). No prompt was submitted.' };
           }
         }
 
