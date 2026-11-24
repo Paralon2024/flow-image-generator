@@ -790,12 +790,39 @@ function startPollingIfNeeded() {
         if (downloadedTileIds.has(tileId)) continue;
         if (uuidFromUrl && downloadedTileIds.has(uuidFromUrl)) continue;
 
-        // Flow may expose the generated media ID as the tile ID rather than the URL UUID.
-        const mapping = (uuidFromUrl ? mediaIdToScene.get(uuidFromUrl) : undefined)
+        // First use the exact media ID captured from Flow's network response.
+        // If Flow's response shape changes or the interceptor misses it, fall back
+        // to the newly-created DOM tile. Only one scene can be IN_PROGRESS, so
+        // a new tile belongs to that active scene.
+        let mapping = (uuidFromUrl ? mediaIdToScene.get(uuidFromUrl) : undefined)
           ?? mediaIdToScene.get(tileId);
 
         if (!mapping) {
-          console.log(`[POLL] tile ${tileId} | imgSrc: ${imgUrl.slice(0, 100)} | urlUuid: ${uuidFromUrl ?? 'none'} | no mapping yet, waiting`);
+          const activeScene = queue.find(q => q.status === 'IN_PROGRESS');
+          if (activeScene) {
+            const existingForScene = [...mediaIdToScene.values()]
+              .filter(v => v.sceneNumber === activeScene.scene_number).length;
+            mapping = {
+              sceneNumber: activeScene.scene_number,
+              imageIndex: existingForScene + 1,
+            };
+            mediaIdToScene.set(tileId, mapping);
+            if (uuidFromUrl) mediaIdToScene.set(uuidFromUrl, mapping);
+            console.log(`[POLL] DOM fallback mapped new tile ${tileId} → scene ${mapping.sceneNumber} img ${mapping.imageIndex}`);
+
+            const generatedCount = [...mediaIdToScene.values()]
+              .filter(v => v.sceneNumber === activeScene.scene_number).length;
+            if (generatedCount >= IMAGES_PER_SCENE && activeScene.status === 'IN_PROGRESS') {
+              activeScene.status = 'GENERATED';
+              console.log(`[QUEUE] scene ${activeScene.scene_number} generation detected from Flow DOM (${generatedCount} media items); advancing queue`);
+              broadcastQueue();
+              processQueue();
+            }
+          }
+        }
+
+        if (!mapping) {
+          console.log(`[POLL] tile ${tileId} | imgSrc: ${imgUrl.slice(0, 100)} | urlUuid: ${uuidFromUrl ?? 'none'} | no active scene mapping yet, waiting`);
           continue;
         }
 
