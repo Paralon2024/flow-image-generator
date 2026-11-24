@@ -393,7 +393,7 @@ async function processQueue() {
     });
 
     const injectionResult = injectionResults?.[0]?.result as
-      | { success?: boolean; error?: string; awaitingTrustedClick?: boolean; clickPoint?: { x: number; y: number } }
+      | { success?: boolean; error?: string; awaitingTrustedInput?: boolean; editorPoint?: { x: number; y: number } }
       | undefined;
 
     if (!injectionResult?.success) {
