@@ -1,7 +1,6 @@
 import { browser } from 'wxt/browser';
 import type { QueueItem } from '../utils/types';
 
-const MAX_CONCURRENT = 3;
 const IMAGES_PER_SCENE = 2;        // Flow generates this many images per prompt
 const INJECT_DELAY_MS = 15_000;    // 15s between injections → max 4 prompts/min = 8 images/min (rate limit)
 const RATE_LIMIT_COOLDOWN_MS = 60_000; // 60s pause when rate limit error is detected
@@ -217,8 +216,9 @@ async function processQueue() {
     return;
   }
 
-  const inProgressCount = queue.filter(q => q.status === 'IN_PROGRESS').length;
-  if (inProgressCount >= MAX_CONCURRENT) return;
+  // Only one Flow prompt may be active at a time. Wait for its generation
+  // response before injecting the next prompt; downloads run independently.
+  if (queue.some(q => q.status === 'IN_PROGRESS')) return;
 
   const nextPending = queue.find(q => q.status === 'PENDING' || q.status === 'RATE_LIMITED');
   if (!nextPending) return;
