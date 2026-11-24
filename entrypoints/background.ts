@@ -222,56 +222,112 @@ async function processQueue() {
       world: 'MAIN',
       func: async (promptText, generationMode, imageModel) => {
         const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-        // Match the selected Flow generation mode before touching the prompt.
-        const agentToggle = document.querySelector<HTMLButtonElement>(
-          'flow-agent-mode-toggle-chip button.agent-mode-chip'
-        );
-        if (!agentToggle) {
-          return { success: false, error: 'Could not find Flow Agent mode control. Reload the Flow project and try again.' };
-        }
-        const agentIsOn = agentToggle.classList.contains('agent-mode-chip-checked') ||
-          agentToggle.closest('flow-agent-mode-toggle-chip')?.classList.contains('checked') === true;
-        const shouldUseAgent = generationMode === 'agent';
-        if (agentIsOn !== shouldUseAgent) {
-          agentToggle.click();
-          await wait(700);
-        }
-        const agentStateAfterClick = agentToggle.classList.contains('agent-mode-chip-checked') ||
-          agentToggle.closest('flow-agent-mode-toggle-chip')?.classList.contains('checked') === true;
-        if (agentStateAfterClick !== shouldUseAgent) {
-          return { success: false, error: 'Google Flow did not switch to the requested Agent mode. No prompt was submitted.' };
-        }
-
-        // The standard prompt box exposes the image model picker in its settings popover.
-        // Agent mode intentionally leaves model choice to Flow's agent router.
-        if (!shouldUseAgent) {
-          const settingsButton = document.querySelector<HTMLButtonElement>(
-            'flow-base-prompt-box div.submit-controls button.settings-trigger-button'
+        const visible = (el: Element | null): el is HTMLElement => {
+          if (!(el instanceof HTMLElement)) return false;
+          const style = getComputedStyle(el);
+          return style.display !== 'none' && style.visibility !== 'hidden' &&
+            (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
+        };
+        const normalize = (value: string) => value.replace(/\\s+/g, ' ').trim();
+        const closeAgentPanel = async () => {
+          const panel = document.querySelector<HTMLElement>('flow-agent-panel');
+          if (!panel || !visible(panel)) return;
+          const close = panel.querySelector<HTMLButtonElement>(
+            "button:has(mat-icon:text-is('right_panel_close')), button:has(mat-icon:text-is('close'))"
           );
+          if (!close) throw new Error('Flow Agent side panel is open, but its Close control was not found.');
+          close.click();
+          for (let elapsed = 0; elapsed < 10_000; elapsed += 200) {
+            if (!visible(panel)) return;
+            await wait(200);
+          }
+          throw new Error('Flow Agent side panel did not close.');
+        };
+        const getAgentToggle = () => document.querySelector<HTMLButtonElement>(
+          'button.agent-mode-chip, flow-agent-mode-switch button.switch'
+        );
+        const isPressed = (button: HTMLButtonElement) =>
+          button.getAttribute('aria-pressed') === 'true' ||
+          button.classList.contains('agent-mode-chip-checked') ||
+          button.classList.contains('checked');
+
+        const shouldUseAgent = generationMode === 'agent';
+        if (!shouldUseAgent) {
+          await closeAgentPanel();
+        }
+
+        let agentToggle = getAgentToggle();
+        if (agentToggle && isPressed(agentToggle) !== shouldUseAgent) {
+          agentToggle.click();
+          await wait(800);
+        }
+        agentToggle = getAgentToggle();
+
+        const agentPanel = document.querySelector<HTMLElement>('flow-agent-panel');
+        const agentPanelOpen = !!agentPanel && visible(agentPanel);
+        let agentBox = document.querySelector<HTMLElement>('flow-creative-agent-prompt-box');
+        if (agentPanelOpen && agentPanel) {
+          agentBox = agentPanel.querySelector<HTMLElement>('flow-creative-agent-prompt-box') || agentBox;
+        }
+        const agentModeActive = agentPanelOpen || (!!agentToggle && isPressed(agentToggle)) ||
+          (!!agentBox && !document.querySelector('flow-base-prompt-box, flow-prompt-box'));
+
+        if (shouldUseAgent && !agentModeActive) {
+          return { success: false, error: 'Could not activate Google Flow Agent mode. No prompt was submitted.' };
+        }
+        if (!shouldUseAgent && agentModeActive) {
+          return { success: false, error: 'Google Flow is still in Agent mode. Close the Agent panel or switch Agent off, then retry. No prompt was submitted.' };
+        }
+
+        let composer: HTMLElement | null = null;
+        let editorDom: HTMLElement | null = null;
+        for (let elapsed = 0; elapsed < 45_000; elapsed += 1_000) {
+          if (shouldUseAgent) {
+            composer = document.querySelector<HTMLElement>('flow-creative-agent-prompt-box');
+            if (agentPanelOpen && agentPanel) {
+              composer = agentPanel.querySelector<HTMLElement>('flow-creative-agent-prompt-box') || composer;
+            }
+          } else {
+            composer = document.querySelector<HTMLElement>('flow-base-prompt-box, flow-prompt-box');
+          }
+          editorDom = composer?.querySelector<HTMLElement>(
+            '.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror'
+          ) ?? composer?.querySelector<HTMLElement>(
+            'div.ProseMirror[contenteditable="true"], [role="textbox"][contenteditable="true"][aria-label="Describe your goal"]'
+          ) ?? null;
+          if (composer && editorDom && visible(editorDom)) break;
+          await wait(1_000);
+        }
+
+        if (!composer || !editorDom || !visible(editorDom)) {
+          return {
+            success: false,
+            error: shouldUseAgent
+              ? 'Google Flow Agent prompt box is not ready. Open a project and wait until the Agent prompt editor is visible.'
+              : 'Google Flow project is not ready. Open a project and wait until the standard prompt editor is visible.',
+          };
+        }
+
+        if (!shouldUseAgent) {
+          const settingsButton = composer.querySelector<HTMLButtonElement>(
+            'button.settings-trigger-button'
+          ) ?? document.querySelector<HTMLButtonElement>('button.settings-trigger-button');
           if (!settingsButton) {
             return { success: false, error: 'Could not find Flow prompt settings. No prompt was submitted.' };
           }
           settingsButton.click();
           await wait(500);
-
-          const settingsPanel = document.querySelector('flow-prompt-box-settings');
+          const settingsPanel = document.querySelector<HTMLElement>(
+            'flow-prompt-box-settings, flow-settings-view'
+          );
           if (!settingsPanel) {
             return { success: false, error: 'Flow prompt settings did not open. No prompt was submitted.' };
           }
-
           const imageToggle = Array.from(settingsPanel.querySelectorAll<HTMLElement>('mat-button-toggle'))
             .find(toggle => toggle.querySelector('mat-icon')?.textContent?.trim() === 'image');
           if (imageToggle && !imageToggle.classList.contains('mat-button-toggle-checked')) {
             imageToggle.querySelector<HTMLButtonElement>('button')?.click();
             await wait(300);
-          }
-
-          const modelTrigger = settingsPanel.querySelector<HTMLButtonElement>(
-            'div.settings-content button:has(span.model-select-trigger-content)'
-          );
-          if (!modelTrigger) {
-            return { success: false, error: 'Could not find the Nano Banana model selector in Flow settings.' };
           }
           const modelNames: Record<string, string> = {
             'nano-banana-pro': 'Nano Banana Pro',
@@ -279,47 +335,34 @@ async function processQueue() {
             'nano-banana-2-lite': 'Nano Banana 2 Lite',
           };
           const requestedModel = modelNames[imageModel] || modelNames['nano-banana-pro'];
-          const activeModel = settingsPanel.querySelector('span.model-select-trigger-content')?.textContent?.trim() || '';
+          const modelTrigger = settingsPanel.querySelector<HTMLButtonElement>(
+            'button:has(span.model-select-trigger-content), button.image-model-picker-button'
+          );
+          if (!modelTrigger) {
+            return { success: false, error: 'Could not find the Nano Banana model selector in Flow settings.' };
+          }
+          const activeModel = normalize(settingsPanel.textContent || '');
           if (!activeModel.toLowerCase().includes(requestedModel.toLowerCase())) {
             modelTrigger.click();
             await wait(350);
-            const modelOption = Array.from(document.querySelectorAll<HTMLButtonElement>(
-              'div.mat-mdc-menu-content flow-menu-item button[role="menuitem"]'
-            )).find(button => (button.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(requestedModel.toLowerCase()));
+            const modelOption = Array.from(document.querySelectorAll<HTMLElement>(
+              '[role="menuitem"], flow-radio-group label.radio-option'
+            )).find(option =>
+              normalize(option.textContent || '').toLowerCase().includes(requestedModel.toLowerCase())
+            );
             if (!modelOption) {
               return { success: false, error: requestedModel + ' is not available in this Google Flow account or could not be found in the model menu.' };
             }
             modelOption.click();
             await wait(500);
           }
-          const selectedModel = settingsPanel.querySelector('span.model-select-trigger-content')?.textContent?.trim() || '';
+          const refreshedSettings = document.querySelector<HTMLElement>(
+            'flow-prompt-box-settings, flow-settings-view'
+          );
+          const selectedModel = normalize(refreshedSettings?.textContent || '');
           if (!selectedModel.toLowerCase().includes(requestedModel.toLowerCase())) {
             return { success: false, error: 'Google Flow did not confirm the selected model (' + requestedModel + '). No prompt was submitted.' };
           }
-        }
-
-        let composer: HTMLElement | null = null;
-        let editorDom: HTMLElement | null = null;
-
-        // Flow can take several seconds to load after opening the Labs entry point.
-        // Wait for the project composer instead of failing immediately on the landing page.
-        for (let elapsed = 0; elapsed < 45_000; elapsed += 1_000) {
-          composer = document.querySelector<HTMLElement>('flow-base-prompt-box');
-          editorDom = composer?.querySelector<HTMLElement>(
-            '.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror'
-          ) ?? composer?.querySelector<HTMLElement>(
-            '[role="textbox"][contenteditable="true"][aria-label="Describe your goal"]'
-          ) ?? null;
-
-          if (composer && editorDom) break;
-          await wait(1_000);
-        }
-
-        if (!composer || !editorDom) {
-          return {
-            success: false,
-            error: 'Google Flow project is not ready. Open or create a project at labs.google/fx/flow, wait until the "Describe your goal" field is visible, then start the queue again.',
-          };
         }
 
         editorDom.focus();
@@ -329,77 +372,62 @@ async function processQueue() {
         range.collapse(false);
         selection?.removeAllRanges();
         selection?.addRange(range);
-
         const beforeInput = new InputEvent('beforeinput', {
-          inputType: 'insertText',
-          data: promptText,
-          bubbles: true,
-          cancelable: true,
+          inputType: 'insertText', data: promptText, bubbles: true, cancelable: true,
         });
         editorDom.dispatchEvent(beforeInput);
-
         if (!beforeInput.defaultPrevented) {
           document.execCommand('insertText', false, promptText);
           editorDom.dispatchEvent(new InputEvent('input', {
-            inputType: 'insertText',
-            data: promptText,
-            bubbles: true,
+            inputType: 'insertText', data: promptText, bubbles: true,
           }));
         }
 
-        const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
         const expected = normalize(promptText);
         const inserted = normalize(editorDom.innerText || editorDom.textContent || '');
         if (!expected || !inserted.includes(expected)) {
-          return {
-            success: false,
-            error: 'Prompt text was not inserted into the Flow editor. The queue was stopped to prevent losing this scene.',
-          };
+          return { success: false, error: 'Prompt text was not inserted into the Flow editor. The queue was stopped to prevent losing this scene.' };
         }
 
-        let sendButton = composer.querySelector<HTMLButtonElement>(
-          'button[aria-label="Start generation"]'
-        );
-
+        const sendSelectors = shouldUseAgent
+          ? ['flow-generate-icon-button button', 'button[aria-label="Send"]', 'button[aria-label="Generate image"]']
+          : ['button[aria-label="Start generation"]', 'flow-generate-icon-button button'];
+        let sendButton: HTMLButtonElement | null = null;
+        for (const selector of sendSelectors) {
+          sendButton = composer.querySelector<HTMLButtonElement>(selector);
+          if (sendButton) break;
+        }
         if (!sendButton) {
           return {
             success: false,
-            error: 'Flow prompt was inserted, but the "Start generation" button was not found inside the composer.',
+            error: shouldUseAgent
+              ? 'Agent prompt was inserted, but its submit button was not found.'
+              : 'Flow prompt was inserted, but the Start generation button was not found.',
           };
         }
 
         for (let attempt = 1; attempt <= 4; attempt += 1) {
-          sendButton = composer.querySelector<HTMLButtonElement>(
-            'button[aria-label="Start generation"]'
-          );
-
+          sendButton = null;
+          for (const selector of sendSelectors) {
+            sendButton = composer.querySelector<HTMLButtonElement>(selector);
+            if (sendButton) break;
+          }
           if (!sendButton) break;
-
           if (sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') {
             await wait(700);
             continue;
           }
-
           sendButton.click();
           await wait(1400);
-
           const remaining = normalize(editorDom.innerText || editorDom.textContent || '');
-          const currentButton = composer.querySelector<HTMLButtonElement>(
-            'button[aria-label="Start generation"]'
-          );
-
-          if (!remaining || !remaining.includes(expected)) {
-            return { success: true, submittedWithButton: true, attempts: attempt };
-          }
-
-          if (currentButton?.disabled || currentButton?.getAttribute('aria-disabled') === 'true') {
+          if (!remaining || !remaining.includes(expected) ||
+              sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') {
             return { success: true, submittedWithButton: true, attempts: attempt };
           }
         }
-
         return {
           success: false,
-          error: 'Flow kept the prompt in the editor after four send attempts. The scene was not marked as submitted; check the Flow page and try again.',
+          error: 'Flow kept the prompt in the editor after four send attempts. Check the Flow page before retrying.',
         };
       },
       args: [nextPending.prompt, activeGenerationMode, activeImageModel],
