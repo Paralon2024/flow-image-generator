@@ -341,7 +341,7 @@ async function processQueue() {
           if (!modelTrigger) {
             return { success: false, error: 'Could not find the Nano Banana model selector in Flow settings.' };
           }
-          const activeModel = normalize(settingsPanel.textContent || '');
+          const activeModel = normalize(modelTrigger.textContent || '');
           if (!activeModel.toLowerCase().includes(requestedModel.toLowerCase())) {
             modelTrigger.click();
             await wait(350);
@@ -359,7 +359,7 @@ async function processQueue() {
           const refreshedSettings = document.querySelector<HTMLElement>(
             'flow-prompt-box-settings, flow-settings-view'
           );
-          const selectedModel = normalize(refreshedSettings?.textContent || '');
+          const selectedTrigger = refreshedSettings?.querySelector<HTMLButtonElement>(\n              'button:has(span.model-select-trigger-content), button.image-model-picker-button'\n            );\n            const selectedModel = normalize(selectedTrigger?.textContent || '');
           if (!selectedModel.toLowerCase().includes(requestedModel.toLowerCase())) {
             return { success: false, error: 'Google Flow did not confirm the selected model (' + requestedModel + '). No prompt was submitted.' };
           }
@@ -390,7 +390,7 @@ async function processQueue() {
         }
 
         const sendSelectors = shouldUseAgent
-          ? ['flow-generate-icon-button button', 'button[aria-label="Send"]', 'button[aria-label="Generate image"]']
+          ? ["button:has(mat-icon:text-is('arrow_forward'))", 'flow-generate-icon-button button', 'button[aria-label="Send"]', 'button[aria-label="Generate image"]']
           : ['button[aria-label="Start generation"]', 'flow-generate-icon-button button'];
         let sendButton: HTMLButtonElement | null = null;
         for (const selector of sendSelectors) {
