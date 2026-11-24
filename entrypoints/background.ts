@@ -461,7 +461,7 @@ async function processQueue() {
         world: 'MAIN',
         func: async (promptText, generationMode) => {
           const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-          const normalize = (value: string) => value.replace(/\\s+/g, ' ').trim();
+          const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
           const shouldUseAgent = generationMode === 'agent';
           const composerSelectors = shouldUseAgent
             ? ['flow-creative-agent-prompt-box']
