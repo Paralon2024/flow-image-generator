@@ -123,6 +123,7 @@ function App() {
     switch (status) {
       case 'PENDING': return '#fbbc04';
       case 'IN_PROGRESS': return '#4285f4';
+      case 'GENERATED': return '#8e24aa';
       case 'DOWNLOADED': return '#34a853';
       case 'ERROR': return '#ea4335';
       case 'RATE_LIMITED': return '#f29900';
@@ -134,6 +135,7 @@ function App() {
     switch (status) {
       case 'PENDING': return '⏳';
       case 'IN_PROGRESS': return '⚙️';
+      case 'GENERATED': return '🖼️';
       case 'DOWNLOADED': return '✅';
       case 'ERROR': return '❌';
       case 'RATE_LIMITED': return '⏸️';
