@@ -846,11 +846,19 @@ function startPollingIfNeeded() {
 
         const sceneItem = queue.find(q => q.scene_number === mapping.sceneNumber && (q.status === 'IN_PROGRESS' || q.status === 'GENERATED'));
         if (sceneItem) {
-          const sceneMediaIds = [...mediaIdToScene.entries()]
-            .filter(([, v]) => v.sceneNumber === mapping.sceneNumber)
-            .map(([k]) => k);
+          const sceneImageMappings = [...mediaIdToScene.entries()]
+            .filter(([, v]) => v.sceneNumber === mapping.sceneNumber);
+          const uniqueImageIndexes = [...new Set(
+            sceneImageMappings.map(([, v]) => v.imageIndex)
+          )];
+          const allSceneImagesDownloaded = uniqueImageIndexes.length >= IMAGES_PER_SCENE &&
+            uniqueImageIndexes.every(imageIndex =>
+              sceneImageMappings.some(([mediaId, image]) =>
+                image.imageIndex === imageIndex && downloadedTileIds.has(mediaId)
+              )
+            );
 
-          if (sceneMediaIds.length >= IMAGES_PER_SCENE && sceneMediaIds.every(mid => downloadedTileIds.has(mid))) {
+          if (allSceneImagesDownloaded) {
             sceneItem.status = 'DOWNLOADED';
             broadcastQueue();
             processQueue();
