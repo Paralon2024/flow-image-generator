@@ -582,7 +582,7 @@ async function processQueue() {
         target: { tabId: submitTabId },
         world: 'MAIN',
         func: (promptText, generationMode) => {
-          const normalize = (value: string) => value.replace(/\\s+/g, ' ').trim();
+          const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
           const shouldUseAgent = generationMode === 'agent';
           const composerSelectors = shouldUseAgent
             ? ['flow-creative-agent-prompt-box']
