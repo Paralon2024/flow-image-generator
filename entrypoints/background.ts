@@ -20,6 +20,17 @@ const mediaIdToScene = new Map<string, { sceneNumber: number; imageIndex: number
 export default defineBackground(() => {
   console.log('Flow Background Queue Orchestrator Started');
 
+  // Open the dashboard in a full browser tab when the toolbar icon is clicked.
+  browser.action.onClicked.addListener(async () => {
+    try {
+      await browser.tabs.create({
+        url: browser.runtime.getURL('/popup.html'),
+        active: true,
+      });
+    } catch (error) {
+      console.error('[DASHBOARD] failed to open dashboard tab', error);
+    }
+  });
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'GET_QUEUE') {
       sendResponse({ queue });
