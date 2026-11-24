@@ -256,7 +256,7 @@ async function processQueue() {
           }));
         }
 
-        const normalize = (value: string) => value.replace(/\\s+/g, ' ').trim();
+        const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
         const expected = normalize(promptText);
         const inserted = normalize(editorDom.innerText || editorDom.textContent || '');
         if (!expected || !inserted.includes(expected)) {
@@ -420,13 +420,13 @@ function startPollingIfNeeded() {
 
       const newTiles = currentTiles.filter(([id, imgUrl]) => {
         if (downloadedTileIds.has(id)) return false;
-        const uuid = imgUrl.match(/(?:[?&]name=|\\/asb\\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
+        const uuid = imgUrl.match(/[?&]name=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
         if (uuid && downloadedTileIds.has(uuid)) return false;
         return true;
       });
 
       for (const [tileId, imgUrl] of newTiles) {
-        const uuidFromUrl = imgUrl.match(/(?:[?&]name=|\\/asb\\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
+        const uuidFromUrl = imgUrl.match(/[?&]name=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
 
         // Guard: another tile earlier in this same loop may have already claimed this uuid
         if (downloadedTileIds.has(tileId)) continue;
