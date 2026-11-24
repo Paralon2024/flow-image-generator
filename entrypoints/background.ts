@@ -215,21 +215,21 @@ async function processQueue() {
       target: { tabId: activeTabId },
       world: 'MAIN',
       func: async (promptText) => {
-        // Flow's current generation composer is a ProseMirror textbox. The old
-        // data-slate-editor selector no longer exists on the current Flow UI.
-        const editorDom = document.querySelector<HTMLElement>(
-          '[role="textbox"][contenteditable="true"][aria-label="What do you want to create?"]'
+        const composer = document.querySelector<HTMLElement>('flow-base-prompt-box');
+        const editorDom = composer?.querySelector<HTMLElement>(
+          '.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror'
+        ) ?? composer?.querySelector<HTMLElement>(
+          '[role="textbox"][contenteditable="true"][aria-label="Describe your goal"]'
         );
 
-        if (!editorDom) {
+        if (!composer || !editorDom) {
           return {
             success: false,
-            error: 'Google Flow generation prompt editor was not found. Open a Flow project and make sure the "What do you want to create?" field is visible.',
+            error: 'Google Flow composer not found. Open a Flow project and make sure the "Describe your goal" prompt field is visible.',
           };
         }
 
         editorDom.focus();
-
         const selection = window.getSelection();
         const range = document.createRange();
         range.selectNodeContents(editorDom);
@@ -237,15 +237,15 @@ async function processQueue() {
         selection?.removeAllRanges();
         selection?.addRange(range);
 
-        const beforeInputEvent = new InputEvent('beforeinput', {
+        const beforeInput = new InputEvent('beforeinput', {
           inputType: 'insertText',
           data: promptText,
           bubbles: true,
           cancelable: true,
         });
-        editorDom.dispatchEvent(beforeInputEvent);
+        editorDom.dispatchEvent(beforeInput);
 
-        if (!beforeInputEvent.defaultPrevented) {
+        if (!beforeInput.defaultPrevented) {
           document.execCommand('insertText', false, promptText);
           editorDom.dispatchEvent(new InputEvent('input', {
             inputType: 'insertText',
@@ -254,46 +254,77 @@ async function processQueue() {
           }));
         }
 
-        // Allow Flow to update its composer state before submitting.
-        await new Promise(resolve => setTimeout(resolve, 800));
-
-        const sendButton = Array.from(document.querySelectorAll('button')).find(button => {
-          const icon = button.querySelector('i.google-symbols');
-          return icon?.textContent?.trim() === 'arrow_forward';
-        });
-
-        if (sendButton) {
-          sendButton.click();
-        } else {
-          // Keyboard submission is a fallback for Flow layouts without the
-          // recognizable arrow_forward button.
-          editorDom.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'Enter',
-            code: 'Enter',
-            keyCode: 13,
-            which: 13,
-            bubbles: true,
-            cancelable: true,
-          }));
+        const normalize = (value: string) => value.replace(/\\s+/g, ' ').trim();
+        const expected = normalize(promptText);
+        const inserted = normalize(editorDom.innerText || editorDom.textContent || '');
+        if (!expected || !inserted.includes(expected)) {
+          return {
+            success: false,
+            error: 'Prompt text was not inserted into the Flow editor. The queue was stopped to prevent losing this scene.',
+          };
         }
 
-        return { success: true, submittedWithButton: Boolean(sendButton) };
+        const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+        let sendButton = composer.querySelector<HTMLButtonElement>(
+          'button[aria-label="Start generation"]'
+        );
+
+        if (!sendButton) {
+          return {
+            success: false,
+            error: 'Flow prompt was inserted, but the "Start generation" button was not found inside the composer.',
+          };
+        }
+
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+          sendButton = composer.querySelector<HTMLButtonElement>(
+            'button[aria-label="Start generation"]'
+          );
+
+          if (!sendButton) break;
+
+          if (sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') {
+            await wait(700);
+            continue;
+          }
+
+          sendButton.click();
+          await wait(1400);
+
+          const remaining = normalize(editorDom.innerText || editorDom.textContent || '');
+          const currentButton = composer.querySelector<HTMLButtonElement>(
+            'button[aria-label="Start generation"]'
+          );
+
+          if (!remaining || !remaining.includes(expected)) {
+            return { success: true, submittedWithButton: true, attempts: attempt };
+          }
+
+          if (currentButton?.disabled || currentButton?.getAttribute('aria-disabled') === 'true') {
+            return { success: true, submittedWithButton: true, attempts: attempt };
+          }
+        }
+
+        return {
+          success: false,
+          error: 'Flow kept the prompt in the editor after four send attempts. The scene was not marked as submitted; check the Flow page and try again.',
+        };
       },
       args: [nextPending.prompt],
     });
 
     const injectionResult = injectionResults?.[0]?.result as
-      | { success?: boolean; error?: string; submittedWithButton?: boolean }
+      | { success?: boolean; error?: string; submittedWithButton?: boolean; attempts?: number }
       | undefined;
 
     if (!injectionResult?.success) {
       throw new Error(
-        injectionResult?.error ?? 'Google Flow prompt injection did not complete.'
+        injectionResult?.error ?? 'Google Flow prompt submission could not be confirmed.'
       );
     }
 
     console.log(
-      `[INJECT] scene ${nextPending.scene_number} prompt inserted; submit button: ${injectionResult.submittedWithButton ? 'found' : 'keyboard fallback'}`
+      `[INJECT] scene ${nextPending.scene_number} submitted via Start generation (attempt ${injectionResult.attempts ?? 1})`
     );
 
     // Keep generations sequential to avoid duplicate requests and Flow rate limits.
@@ -386,13 +417,13 @@ function startPollingIfNeeded() {
 
       const newTiles = currentTiles.filter(([id, imgUrl]) => {
         if (downloadedTileIds.has(id)) return false;
-        const uuid = imgUrl.match(/[?&]name=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
+        const uuid = imgUrl.match(/(?:[?&]name=|\\/asb\\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
         if (uuid && downloadedTileIds.has(uuid)) return false;
         return true;
       });
 
       for (const [tileId, imgUrl] of newTiles) {
-        const uuidFromUrl = imgUrl.match(/[?&]name=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
+        const uuidFromUrl = imgUrl.match(/(?:[?&]name=|\\/asb\\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
 
         // Guard: another tile earlier in this same loop may have already claimed this uuid
         if (downloadedTileIds.has(tileId)) continue;
