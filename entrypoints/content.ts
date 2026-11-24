@@ -1,4 +1,4 @@
-export default defineContentScript({
+// Flow now serves migrated projects from flow.google.com; labs.google remains supported.\nexport default defineContentScript({
   matches: ['https://labs.google/*', 'https://flow.google.com/*'],
   main() {
     console.log('[FLOW-EXT] Content script loaded (isolated world)');
