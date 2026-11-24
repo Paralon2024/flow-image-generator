@@ -463,24 +463,45 @@ async function processQueue() {
           const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
           const normalize = (value: string) => value.replace(/\\s+/g, ' ').trim();
           const shouldUseAgent = generationMode === 'agent';
-          const composer = shouldUseAgent
-            ? document.querySelector<HTMLElement>('flow-creative-agent-prompt-box')
-            : document.querySelector<HTMLElement>('flow-base-prompt-box, flow-prompt-box');
-          const editor = composer?.querySelector<HTMLElement>(
-            '.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror'
-          ) ?? composer?.querySelector<HTMLElement>(
-            'div.ProseMirror[contenteditable="true"], [role="textbox"][contenteditable="true"][aria-label="Describe your goal"]'
-          ) ?? null;
+          const composerSelectors = shouldUseAgent
+            ? ['flow-creative-agent-prompt-box']
+            : ['flow-base-prompt-box', 'flow-prompt-box'];
+          const editorSelectors = shouldUseAgent
+            ? ['.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror', 'div.ProseMirror[contenteditable="true"]', '[role="textbox"][contenteditable="true"]']
+            : ['.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror', 'div.ProseMirror[contenteditable="true"]', '[role="textbox"][contenteditable="true"][aria-label="What do you want to create?"]', '[role="textbox"][aria-multiline="true"][contenteditable="true"]', '[role="textbox"][contenteditable="true"][aria-label="Describe your goal"]'];
           const selectors = shouldUseAgent
             ? ["button:has(mat-icon:text-is('arrow_forward'))", 'flow-generate-icon-button button', 'button[aria-label="Send"]', 'button[aria-label="Generate image"]']
             : ['button[aria-label="Start generation"]', 'flow-generate-icon-button button'];
           const expected = normalize(promptText);
+          const findCurrentElements = () => {
+            let currentComposer: HTMLElement | null = null;
+            for (const selector of composerSelectors) {
+              currentComposer = document.querySelector<HTMLElement>(selector);
+              if (currentComposer) break;
+            }
+            let currentEditor: HTMLElement | null = null;
+            for (const selector of editorSelectors) {
+              currentEditor = currentComposer?.querySelector<HTMLElement>(selector) ?? null;
+              if (currentEditor) break;
+            }
+            if (!currentEditor && !shouldUseAgent) {
+              currentEditor = document.querySelector<HTMLElement>(
+                '[role="textbox"][contenteditable="true"][aria-label="What do you want to create?"]'
+              ) ?? document.querySelector<HTMLElement>(
+                '[role="textbox"][aria-multiline="true"][contenteditable="true"]'
+              );
+            }
+            return { currentComposer, currentEditor };
+          };
 
-          for (let elapsed = 0; elapsed < 15_000; elapsed += 250) {
-            const actual = normalize(editor?.innerText || editor?.textContent || '');
+          for (let elapsed = 0; elapsed < 20_000; elapsed += 250) {
+            // Angular may replace the ProseMirror node after input; never inspect a stale node.
+            const { currentComposer, currentEditor } = findCurrentElements();
+            const actual = normalize(currentEditor?.innerText || currentEditor?.textContent || '');
             let button: HTMLButtonElement | null = null;
             for (const selector of selectors) {
-              const candidate = composer?.querySelector<HTMLButtonElement>(selector);
+              const candidate = currentComposer?.querySelector<HTMLButtonElement>(selector)
+                ?? document.querySelector<HTMLButtonElement>(selector);
               if (candidate && candidate.getClientRects().length > 0) {
                 button = candidate;
                 break;
@@ -490,28 +511,35 @@ async function processQueue() {
                 !button.disabled && button.getAttribute('aria-disabled') !== 'true') {
               const rect = button.getBoundingClientRect();
               if (rect.width > 0 && rect.height > 0) {
-                return {
-                  success: true,
-                  clickPoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
-                };
+                return { success: true, clickPoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } };
               }
             }
             await wait(250);
           }
 
-          const finalText = normalize(editor?.innerText || editor?.textContent || '');
+          const { currentComposer: finalComposer, currentEditor: finalEditor } = findCurrentElements();
+          const finalText = normalize(finalEditor?.innerText || finalEditor?.textContent || '');
           let finalButton: HTMLButtonElement | null = null;
           for (const selector of selectors) {
-            const candidate = composer?.querySelector<HTMLButtonElement>(selector);
+            const candidate = finalComposer?.querySelector<HTMLButtonElement>(selector)
+              ?? document.querySelector<HTMLButtonElement>(selector);
             if (candidate && candidate.getClientRects().length > 0) {
               finalButton = candidate;
               break;
             }
           }
+          const active = document.activeElement as HTMLElement | null;
           return {
             success: false,
             error: 'Flow did not enable its submit button after trusted keyboard input. ' +
               'promptVisible=' + String(!!expected && finalText.includes(expected)) +
+              ', editorFound=' + String(!!finalEditor) +
+              ', editorConnected=' + String(finalEditor?.isConnected ?? false) +
+              ', editorLabel=' + String(finalEditor?.getAttribute('aria-label') ?? 'missing') +
+              ', editorText=' + JSON.stringify(finalText.slice(0, 180)) +
+              ', activeElement=' + String(active?.tagName ?? 'none') +
+              ', activeLabel=' + String(active?.getAttribute('aria-label') ?? 'missing') +
+              ', composerFound=' + String(!!finalComposer) +
               ', disabled=' + String(finalButton?.disabled ?? 'button-not-found') +
               ', ariaDisabled=' + String(finalButton?.getAttribute('aria-disabled') ?? 'missing'),
           };
