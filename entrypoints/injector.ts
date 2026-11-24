@@ -1,5 +1,5 @@
 export default defineContentScript({
-  matches: ['https://labs.google/*'],
+  matches: ['https://labs.google/*', 'https://flow.google/*'],
   world: 'MAIN',
   runAt: 'document_start',
   main() {
