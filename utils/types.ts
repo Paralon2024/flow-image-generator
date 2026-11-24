@@ -1,4 +1,4 @@
-export type PromptStatus = 'PENDING' | 'IN_PROGRESS' | 'DOWNLOADED' | 'ERROR' | 'RATE_LIMITED';
+export type PromptStatus = 'PENDING' | 'IN_PROGRESS' | 'GENERATED' | 'DOWNLOADED' | 'ERROR' | 'RATE_LIMITED';
 
 export interface QueueItem {
   id: string;
