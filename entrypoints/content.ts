@@ -1,5 +1,5 @@
 export default defineContentScript({
-  matches: ['https://labs.google/*', 'https://flow.google/*'],
+  matches: ['https://labs.google/*', 'https://flow.google.com/*'],
   main() {
     console.log('[FLOW-EXT] Content script loaded (isolated world)');
 
