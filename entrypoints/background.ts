@@ -12,6 +12,8 @@ let isInjecting = false;
 let pollingInterval: any = null;
 let activeTabId: number | null = null;
 let rateLimitCooldownUntil = 0; // timestamp — no new injections before this
+let activeGenerationMode: 'agent' | 'standard' = 'standard';
+let activeImageModel = 'nano-banana-pro';
 
 // mediaId (= data-tile-id in DOM) → { sceneNumber, imageIndex }
 const mediaIdToScene = new Map<string, { sceneNumber: number; imageIndex: number }>();
@@ -28,6 +30,8 @@ export default defineBackground(() => {
     if (message.type === 'START_QUEUE') {
       const { prompts, tabId } = message;
       activeTabId = tabId;
+      activeGenerationMode = message.generationMode === 'agent' ? 'agent' : 'standard';
+      activeImageModel = typeof message.imageModel === 'string' ? message.imageModel : 'nano-banana-pro';
 
       const newItems: QueueItem[] = prompts.map((p: { scene_number: number; prompt: string }) => ({
         id: Math.random().toString(36).substring(2, 9),
@@ -216,8 +220,84 @@ async function processQueue() {
     const injectionResults = await chrome.scripting.executeScript({
       target: { tabId: activeTabId },
       world: 'MAIN',
-      func: async (promptText) => {
+      func: async (promptText, generationMode, imageModel) => {
         const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+        // Match the selected Flow generation mode before touching the prompt.
+        const agentToggle = document.querySelector<HTMLButtonElement>(
+          'flow-agent-mode-toggle-chip button.agent-mode-chip'
+        );
+        if (!agentToggle) {
+          return { success: false, error: 'Could not find Flow Agent mode control. Reload the Flow project and try again.' };
+        }
+        const agentIsOn = agentToggle.classList.contains('agent-mode-chip-checked') ||
+          agentToggle.closest('flow-agent-mode-toggle-chip')?.classList.contains('checked') === true;
+        const shouldUseAgent = generationMode === 'agent';
+        if (agentIsOn !== shouldUseAgent) {
+          agentToggle.click();
+          await wait(700);
+        }
+        const agentStateAfterClick = agentToggle.classList.contains('agent-mode-chip-checked') ||
+          agentToggle.closest('flow-agent-mode-toggle-chip')?.classList.contains('checked') === true;
+        if (agentStateAfterClick !== shouldUseAgent) {
+          return { success: false, error: 'Google Flow did not switch to the requested Agent mode. No prompt was submitted.' };
+        }
+
+        // The standard prompt box exposes the image model picker in its settings popover.
+        // Agent mode intentionally leaves model choice to Flow's agent router.
+        if (!shouldUseAgent) {
+          const settingsButton = document.querySelector<HTMLButtonElement>(
+            'flow-base-prompt-box div.submit-controls button.settings-trigger-button'
+          );
+          if (!settingsButton) {
+            return { success: false, error: 'Could not find Flow prompt settings. No prompt was submitted.' };
+          }
+          settingsButton.click();
+          await wait(500);
+
+          const settingsPanel = document.querySelector('flow-prompt-box-settings');
+          if (!settingsPanel) {
+            return { success: false, error: 'Flow prompt settings did not open. No prompt was submitted.' };
+          }
+
+          const imageToggle = Array.from(settingsPanel.querySelectorAll<HTMLElement>('mat-button-toggle'))
+            .find(toggle => toggle.querySelector('mat-icon')?.textContent?.trim() === 'image');
+          if (imageToggle && !imageToggle.classList.contains('mat-button-toggle-checked')) {
+            imageToggle.querySelector<HTMLButtonElement>('button')?.click();
+            await wait(300);
+          }
+
+          const modelTrigger = settingsPanel.querySelector<HTMLButtonElement>(
+            'div.settings-content button:has(span.model-select-trigger-content)'
+          );
+          if (!modelTrigger) {
+            return { success: false, error: 'Could not find the Nano Banana model selector in Flow settings.' };
+          }
+          const modelNames: Record<string, string> = {
+            'nano-banana-pro': 'Nano Banana Pro',
+            'nano-banana-2': 'Nano Banana 2.1',
+            'nano-banana-2-lite': 'Nano Banana 2 Lite',
+          };
+          const requestedModel = modelNames[imageModel] || modelNames['nano-banana-pro'];
+          const activeModel = settingsPanel.querySelector('span.model-select-trigger-content')?.textContent?.trim() || '';
+          if (!activeModel.toLowerCase().includes(requestedModel.toLowerCase())) {
+            modelTrigger.click();
+            await wait(350);
+            const modelOption = Array.from(document.querySelectorAll<HTMLButtonElement>(
+              'div.mat-mdc-menu-content flow-menu-item button[role="menuitem"]'
+            )).find(button => (button.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(requestedModel.toLowerCase()));
+            if (!modelOption) {
+              return { success: false, error: requestedModel + ' is not available in this Google Flow account or could not be found in the model menu.' };
+            }
+            modelOption.click();
+            await wait(500);
+          }
+          const selectedModel = settingsPanel.querySelector('span.model-select-trigger-content')?.textContent?.trim() || '';
+          if (!selectedModel.toLowerCase().includes(requestedModel.toLowerCase())) {
+            return { success: false, error: 'Google Flow did not confirm the selected model (' + requestedModel + '). No prompt was submitted.' };
+          }
+        }
+
         let composer: HTMLElement | null = null;
         let editorDom: HTMLElement | null = null;
 
@@ -322,7 +402,7 @@ async function processQueue() {
           error: 'Flow kept the prompt in the editor after four send attempts. The scene was not marked as submitted; check the Flow page and try again.',
         };
       },
-      args: [nextPending.prompt],
+      args: [nextPending.prompt, activeGenerationMode, activeImageModel],
     });
 
     const injectionResult = injectionResults?.[0]?.result as
