@@ -554,20 +554,105 @@ async function processQueue() {
         throw new Error(ready?.error ?? 'Flow did not confirm that the prompt is ready to submit.');
       }
 
-      debuggerStep = 'trusted click on Flow submit button';
-      const submitPoint = ready.clickPoint;
-      console.log('[CDP] submit button is enabled; dispatching trusted click', submitPoint);
-      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
-        type: 'mouseMoved', x: submitPoint.x, y: submitPoint.y,
+      debuggerStep = 'trusted Enter key submission';
+      console.log('[CDP] submit button is enabled; trying trusted Enter first');
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
+        text: '\r',
+        unmodifiedText: '\r',
       });
-      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
-        type: 'mousePressed', x: submitPoint.x, y: submitPoint.y,
-        button: 'left', clickCount: 1,
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
       });
-      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
-        type: 'mouseReleased', x: submitPoint.x, y: submitPoint.y,
-        button: 'left', clickCount: 1,
+
+      // Give Flow time to handle Enter. If the prompt was submitted, the editor
+      // should clear or the submit button should become disabled. Only then use
+      // the trusted mouse click as a fallback.
+      await new Promise(resolve => setTimeout(resolve, 1_500));
+      debuggerStep = 'verify Enter submission';
+      const enterCheckResults = await chrome.scripting.executeScript({
+        target: { tabId: submitTabId },
+        world: 'MAIN',
+        func: (promptText, generationMode) => {
+          const normalize = (value: string) => value.replace(/\\s+/g, ' ').trim();
+          const shouldUseAgent = generationMode === 'agent';
+          const composerSelectors = shouldUseAgent
+            ? ['flow-creative-agent-prompt-box']
+            : ['flow-base-prompt-box', 'flow-prompt-box'];
+          const editorSelectors = shouldUseAgent
+            ? ['.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror', 'div.ProseMirror[contenteditable="true"]', '[role="textbox"][contenteditable="true"]']
+            : ['.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror', 'div.ProseMirror[contenteditable="true"]', '[role="textbox"][contenteditable="true"][aria-label="What do you want to create?"]', '[role="textbox"][aria-multiline="true"][contenteditable="true"]', '[role="textbox"][contenteditable="true"][aria-label="Describe your goal"]'];
+          const buttonSelectors = shouldUseAgent
+            ? ["button:has(mat-icon:text-is('arrow_forward'))", 'flow-generate-icon-button button', 'button[aria-label="Send"]', 'button[aria-label="Generate image"]']
+            : ['button[aria-label="Start generation"]', 'flow-generate-icon-button button'];
+          let composer: HTMLElement | null = null;
+          for (const selector of composerSelectors) {
+            composer = document.querySelector<HTMLElement>(selector);
+            if (composer) break;
+          }
+          let editor: HTMLElement | null = null;
+          for (const selector of editorSelectors) {
+            editor = composer?.querySelector<HTMLElement>(selector) ?? null;
+            if (editor) break;
+          }
+          if (!editor && !shouldUseAgent) {
+            editor = document.querySelector<HTMLElement>(
+              '[role="textbox"][contenteditable="true"][aria-label="What do you want to create?"]'
+            ) ?? document.querySelector<HTMLElement>(
+              '[role="textbox"][aria-multiline="true"][contenteditable="true"]'
+            );
+          }
+          let button: HTMLButtonElement | null = null;
+          for (const selector of buttonSelectors) {
+            const candidate = composer?.querySelector<HTMLButtonElement>(selector)
+              ?? document.querySelector<HTMLButtonElement>(selector);
+            if (candidate && candidate.getClientRects().length > 0) {
+              button = candidate;
+              break;
+            }
+          }
+          const actual = normalize(editor?.innerText || editor?.textContent || '');
+          const promptStillPresent = !!normalize(promptText) && actual.includes(normalize(promptText));
+          const buttonDisabled = !!button && (button.disabled || button.getAttribute('aria-disabled') === 'true');
+          return {
+            submitted: !promptStillPresent || buttonDisabled,
+            promptStillPresent,
+            buttonDisabled,
+            editorText: actual.slice(0, 180),
+          };
+        },
+        args: [nextPending.prompt, activeGenerationMode],
       });
+      const enterCheck = enterCheckResults?.[0]?.result as
+        | { submitted?: boolean; promptStillPresent?: boolean; buttonDisabled?: boolean; editorText?: string }
+        | undefined;
+
+      if (enterCheck?.submitted) {
+        console.log('[CDP] Enter submission appears accepted by Flow', enterCheck);
+      } else {
+        debuggerStep = 'trusted click fallback after Enter';
+        const submitPoint = ready.clickPoint;
+        console.warn('[CDP] Enter did not clear/disable the composer; falling back to trusted click', enterCheck);
+        await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+          type: 'mouseMoved', x: submitPoint.x, y: submitPoint.y,
+        });
+        await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+          type: 'mousePressed', x: submitPoint.x, y: submitPoint.y,
+          button: 'left', clickCount: 1,
+        });
+        await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+          type: 'mouseReleased', x: submitPoint.x, y: submitPoint.y,
+          button: 'left', clickCount: 1,
+        });
+      }
     } catch (error: any) {
       const details = {
         name: error?.name ?? null,
