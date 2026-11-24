@@ -77,8 +77,8 @@ function App() {
     setError('');
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const labsFlowUrl = 'https://labs.google/fx/flow';
-      const isLabsFlow = Boolean(tab?.url && /^https:\/\/labs\.google\/fx\/flow(?:\/|$)/i.test(tab.url));
+      const labsFlowUrl = 'https://labs.google/fx/tools/flow';
+      const isLabsFlow = Boolean(tab?.url && /^https:\/\/labs\.google\/fx\/tools\/flow(?:\/|$)/i.test(tab.url));
       const isMigratedFlow = Boolean(tab?.url && /^https:\/\/flow\.google\.com\//i.test(tab.url));
 
       if (!tab?.id) {
