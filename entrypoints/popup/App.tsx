@@ -38,21 +38,31 @@ function App() {
     reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target?.result as string) as ScriptData;
-        if (!json.scenes || !Array.isArray(json.scenes)) {
-          setError('The JSON file has an invalid format (the "scenes" array is missing).');
+        if (!json || !Array.isArray(json.scenes) || json.scenes.length === 0) {
+          setError('El archivo JSON no tiene el formato esperado (falta un array "scenes" válido).');
           return;
         }
-        
-        const prepared = json.scenes.map(scene => ({
-          scene_number: scene.scene_number,
-          prompt: parseImagePromptToText(scene.image_prompt)
-        }));
+
+        const prepared = json.scenes.map((scene, index) => {
+          if (!scene || !Number.isFinite(Number(scene.scene_number)) || !scene.image_prompt ||
+              !Array.isArray(scene.image_prompt.subjects) ||
+              typeof scene.image_prompt.environment !== 'string' ||
+              typeof scene.image_prompt.lighting !== 'string' ||
+              typeof scene.image_prompt.composition !== 'string' ||
+              typeof scene.image_prompt.style !== 'string') {
+            throw new Error(`La escena ${index + 1} no tiene un image_prompt válido.`);
+          }
+          return {
+            scene_number: Number(scene.scene_number),
+            prompt: parseImagePromptToText(scene.image_prompt)
+          };
+        });
         
         setParsedScenes(prepared);
         setError('');
       } catch (err) {
         console.error(err);
-        setError('Unable to read the JSON file.');
+        setError(err instanceof Error ? err.message : 'Error al leer el archivo JSON.');
       }
     };
     reader.readAsText(file);
@@ -60,15 +70,25 @@ function App() {
 
   const handleStartQueue = async () => {
     if (parsedScenes.length === 0) {
-      setError('Please upload a JSON file first.');
+      setError('Por favor, sube un archivo JSON primero.');
       return;
     }
 
     setError('');
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab.id) {
-        setError('Error: No active tab found.');
+      const labsFlowUrl = 'https://labs.google/fx/tools/flow';
+      const isLabsFlow = Boolean(tab?.url && /^https:\/\/labs\.google\/fx\/tools\/flow(?:\/|$)/i.test(tab.url));
+      const isMigratedFlow = Boolean(tab?.url && /^https:\/\/flow\.google\.com\//i.test(tab.url));
+
+      if (!tab?.id) {
+        setError('Open Google Flow in a browser tab before starting generation.');
+        return;
+      }
+
+      if (!isLabsFlow && !isMigratedFlow) {
+        await chrome.tabs.update(tab.id, { url: labsFlowUrl });
+        setError('Google Flow has been opened. Open an existing project or create a new project, then click Start Generation again.');
         return;
       }
 
@@ -83,7 +103,7 @@ function App() {
       // Reset input file value if needed, but react handles it okay if re-mounted
     } catch (err) {
       console.error(err);
-      setError('Unable to communicate with the extension.');
+      setError('Error al comunicar con la extensión.');
     }
   };
 
@@ -97,6 +117,7 @@ function App() {
       case 'IN_PROGRESS': return '#4285f4';
       case 'DOWNLOADED': return '#34a853';
       case 'ERROR': return '#ea4335';
+      case 'RATE_LIMITED': return '#f29900';
       default: return '#5f6368';
     }
   };
@@ -107,6 +128,7 @@ function App() {
       case 'IN_PROGRESS': return '⚙️';
       case 'DOWNLOADED': return '✅';
       case 'ERROR': return '❌';
+      case 'RATE_LIMITED': return '⏸️';
       default: return '❓';
     }
   };
@@ -123,7 +145,7 @@ function App() {
       
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px dashed #dadce0' }}>
         <p style={{ margin: 0, fontSize: '12px', color: '#5f6368', fontWeight: '500' }}>
-          1. Upload your script.json file
+          1. Sube tu archivo script.json
         </p>
         <input 
           type="file" 
@@ -134,7 +156,7 @@ function App() {
         
         {parsedScenes.length > 0 && (
           <div style={{ fontSize: '12px', color: '#1e8e3e', fontWeight: 'bold' }}>
-            ✓ File loaded: {fileName} ({parsedScenes.length} scenes detected)
+            ✓ Archivo cargado: {fileName} ({parsedScenes.length} escenas detectadas)
           </div>
         )}
 
@@ -154,7 +176,7 @@ function App() {
               transition: 'background-color 0.2s'
             }}
           >
-            Start Generation
+            Iniciar Generación
           </button>
           
           <button 
@@ -169,7 +191,7 @@ function App() {
               fontWeight: '500'
             }}
           >
-            Clear Queue
+            Limpiar Cola
           </button>
         </div>
       </div>
@@ -180,11 +202,11 @@ function App() {
         </p>
       )}
 
-      {/* Progress Bar */}
+      {/* Barra de Progreso */}
       {totalItems > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#5f6368', fontWeight: 'bold' }}>
-            <span>Overall Progress</span>
+            <span>Progreso General</span>
             <span>{downloadedItems} / {totalItems} ({progressPercent}%)</span>
           </div>
           <div style={{ height: '8px', width: '100%', backgroundColor: '#e8eaed', borderRadius: '4px', overflow: 'hidden' }}>
@@ -193,12 +215,12 @@ function App() {
         </div>
       )}
 
-      {/* Processing Queue */}
+      {/* Cola de Trabajo */}
       <div style={{ borderTop: '1px solid #eee', paddingTop: '12px' }}>
-        <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#3c4043' }}>Scene Details</h3>
+        <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#3c4043' }}>Detalle de Escenas</h3>
         
         {queue.length === 0 ? (
-          <p style={{ fontSize: '12px', color: '#9aa0a6', fontStyle: 'italic' }}>No scenes are currently being processed.</p>
+          <p style={{ fontSize: '12px', color: '#9aa0a6', fontStyle: 'italic' }}>No hay escenas en procesamiento.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '250px', overflowY: 'auto' }}>
             {queue.map((item) => (
@@ -217,7 +239,7 @@ function App() {
                 <span title={item.status} style={{ marginTop: '2px' }}>{getStatusIcon(item.status)}</span>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <span style={{ fontSize: '11px', color: '#5f6368', fontWeight: 'bold' }}>
-                    Scene {item.scene_number} - {item.status}
+                    Escena {item.scene_number} - {item.status}
                   </span>
                   <span style={{ 
                     fontSize: '11px', 
