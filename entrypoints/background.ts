@@ -24,7 +24,7 @@ export default defineBackground(() => {
   browser.action.onClicked.addListener(async () => {
     try {
       await browser.tabs.create({
-        url: browser.runtime.getURL('/popup.html'),
+        url: browser.runtime.getURL('/dashboard.html'),
         active: true,
       });
     } catch (error) {
