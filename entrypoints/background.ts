@@ -373,70 +373,20 @@ async function processQueue() {
           }
         }
 
+        // Do not modify ProseMirror with synthetic beforeinput/input events.
+        // The worker will focus this editor and insert text using trusted CDP input.
         editorDom.focus();
-        const selection = window.getSelection();
-        const range = document.createRange();
-        range.selectNodeContents(editorDom);
-        range.collapse(false);
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-        const beforeInput = new InputEvent('beforeinput', {
-          inputType: 'insertText', data: promptText, bubbles: true, cancelable: true,
-        });
-        editorDom.dispatchEvent(beforeInput);
-        if (!beforeInput.defaultPrevented) {
-          document.execCommand('insertText', false, promptText);
-          editorDom.dispatchEvent(new InputEvent('input', {
-            inputType: 'insertText', data: promptText, bubbles: true,
-          }));
-        }
-
-        const expected = normalize(promptText);
-        const inserted = normalize(editorDom.innerText || editorDom.textContent || '');
-        if (!expected || !inserted.includes(expected)) {
-          return { success: false, error: 'Prompt text was not inserted into the Flow editor. The queue was stopped to prevent losing this scene.' };
-        }
-
-        // Flow uses a ProseMirror editor and an Angular-owned Generate button.
-        // Return the visible button's viewport coordinates; the extension worker
-        // activates it with Chrome DevTools Protocol trusted pointer input.
-        const sendSelectors = shouldUseAgent
-          ? ["button:has(mat-icon:text-is('arrow_forward'))", 'flow-generate-icon-button button', 'button[aria-label="Send"]', 'button[aria-label="Generate image"]']
-          : ['button[aria-label="Start generation"]', 'flow-generate-icon-button button'];
-        let sendButton: HTMLButtonElement | null = null;
-        for (const selector of sendSelectors) {
-          const candidate = composer.querySelector<HTMLButtonElement>(selector);
-          if (candidate && visible(candidate)) {
-            sendButton = candidate;
-            break;
-          }
-        }
-        if (!sendButton) {
-          return {
-            success: false,
-            error: shouldUseAgent
-              ? 'Agent prompt was inserted, but its visible Send button was not found.'
-              : 'Prompt was inserted, but Flow\'s visible Start generation button was not found.',
-          };
-        }
-        if (sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') {
-          return {
-            success: false,
-            error: 'Flow\'s submit button is disabled after prompt insertion. No click was sent.',
-          };
-        }
-
-        const rect = sendButton.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) {
-          return { success: false, error: 'Flow\'s submit button has no visible clickable area.' };
+        const editorRect = editorDom.getBoundingClientRect();
+        if (editorRect.width <= 0 || editorRect.height <= 0) {
+          return { success: false, error: 'Flow prompt editor has no visible clickable area.' };
         }
 
         return {
           success: true,
-          awaitingTrustedClick: true,
-          clickPoint: {
-            x: rect.left + rect.width / 2,
-            y: rect.top + rect.height / 2,
+          awaitingTrustedInput: true,
+          editorPoint: {
+            x: editorRect.left + editorRect.width / 2,
+            y: editorRect.top + editorRect.height / 2,
           },
         };      },
       args: [nextPending.prompt, activeGenerationMode, activeImageModel],
@@ -452,8 +402,8 @@ async function processQueue() {
       );
     }
 
-    if (!injectionResult.awaitingTrustedClick || !injectionResult.clickPoint) {
-      throw new Error('Flow did not return a valid submit-button target.');
+    if (!injectionResult.awaitingTrustedInput || !injectionResult.editorPoint) {
+      throw new Error('Flow did not return a valid prompt-editor target.');
     }
 
     const submitTabId = activeTabId;
@@ -465,34 +415,130 @@ async function processQueue() {
       console.log('[CDP] attaching debugger to Flow tab', submitTabId);
       await chrome.debugger.attach(debuggee, '1.3');
       debuggerAttached = true;
-      const point = injectionResult.clickPoint;
 
-      debuggerStep = 'Input.dispatchMouseEvent mouseMoved';
-      console.log('[CDP] dispatching mouseMoved', point);
+      const editorPoint = injectionResult.editorPoint;
+      debuggerStep = 'trusted click on prompt editor';
+      console.log('[CDP] focusing prompt editor', editorPoint);
       await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
-        type: 'mouseMoved',
-        x: point.x,
-        y: point.y,
+        type: 'mouseMoved', x: editorPoint.x, y: editorPoint.y,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mousePressed', x: editorPoint.x, y: editorPoint.y,
+        button: 'left', clickCount: 1,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mouseReleased', x: editorPoint.x, y: editorPoint.y,
+        button: 'left', clickCount: 1,
       });
 
-      debuggerStep = 'Input.dispatchMouseEvent mousePressed';
-      console.log('[CDP] dispatching mousePressed', point);
-      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
-        type: 'mousePressed',
-        x: point.x,
-        y: point.y,
-        button: 'left',
-        clickCount: 1,
+      debuggerStep = 'trusted Ctrl+A in prompt editor';
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', {
+        type: 'keyDown', key: 'Control', code: 'ControlLeft',
+        windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', {
+        type: 'rawKeyDown', key: 'a', code: 'KeyA', modifiers: 2,
+        windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', {
+        type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2,
+        windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', {
+        type: 'keyUp', key: 'Control', code: 'ControlLeft',
+        windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17,
       });
 
-      debuggerStep = 'Input.dispatchMouseEvent mouseReleased';
-      console.log('[CDP] dispatching mouseReleased', point);
+      debuggerStep = 'trusted Input.insertText';
+      console.log('[CDP] inserting prompt through trusted keyboard input');
+      await chrome.debugger.sendCommand(debuggee, 'Input.insertText', {
+        text: nextPending.prompt,
+      });
+
+      debuggerStep = 'wait for Flow to enable submit';
+      const readyResults = await chrome.scripting.executeScript({
+        target: { tabId: submitTabId },
+        world: 'MAIN',
+        func: async (promptText, generationMode) => {
+          const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+          const normalize = (value: string) => value.replace(/\\s+/g, ' ').trim();
+          const shouldUseAgent = generationMode === 'agent';
+          const composer = shouldUseAgent
+            ? document.querySelector<HTMLElement>('flow-creative-agent-prompt-box')
+            : document.querySelector<HTMLElement>('flow-base-prompt-box, flow-prompt-box');
+          const editor = composer?.querySelector<HTMLElement>(
+            '.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror'
+          ) ?? composer?.querySelector<HTMLElement>(
+            'div.ProseMirror[contenteditable="true"], [role="textbox"][contenteditable="true"][aria-label="Describe your goal"]'
+          ) ?? null;
+          const selectors = shouldUseAgent
+            ? ["button:has(mat-icon:text-is('arrow_forward'))", 'flow-generate-icon-button button', 'button[aria-label="Send"]', 'button[aria-label="Generate image"]']
+            : ['button[aria-label="Start generation"]', 'flow-generate-icon-button button'];
+          const expected = normalize(promptText);
+
+          for (let elapsed = 0; elapsed < 15_000; elapsed += 250) {
+            const actual = normalize(editor?.innerText || editor?.textContent || '');
+            let button: HTMLButtonElement | null = null;
+            for (const selector of selectors) {
+              const candidate = composer?.querySelector<HTMLButtonElement>(selector);
+              if (candidate && candidate.getClientRects().length > 0) {
+                button = candidate;
+                break;
+              }
+            }
+            if (expected && actual.includes(expected) && button &&
+                !button.disabled && button.getAttribute('aria-disabled') !== 'true') {
+              const rect = button.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                return {
+                  success: true,
+                  clickPoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+                };
+              }
+            }
+            await wait(250);
+          }
+
+          const finalText = normalize(editor?.innerText || editor?.textContent || '');
+          let finalButton: HTMLButtonElement | null = null;
+          for (const selector of selectors) {
+            const candidate = composer?.querySelector<HTMLButtonElement>(selector);
+            if (candidate && candidate.getClientRects().length > 0) {
+              finalButton = candidate;
+              break;
+            }
+          }
+          return {
+            success: false,
+            error: 'Flow did not enable its submit button after trusted keyboard input. ' +
+              'promptVisible=' + String(!!expected && finalText.includes(expected)) +
+              ', disabled=' + String(finalButton?.disabled ?? 'button-not-found') +
+              ', ariaDisabled=' + String(finalButton?.getAttribute('aria-disabled') ?? 'missing'),
+          };
+        },
+        args: [nextPending.prompt, activeGenerationMode],
+      });
+
+      const ready = readyResults?.[0]?.result as
+        | { success?: boolean; error?: string; clickPoint?: { x: number; y: number } }
+        | undefined;
+      if (!ready?.success || !ready.clickPoint) {
+        throw new Error(ready?.error ?? 'Flow did not confirm that the prompt is ready to submit.');
+      }
+
+      debuggerStep = 'trusted click on Flow submit button';
+      const submitPoint = ready.clickPoint;
+      console.log('[CDP] submit button is enabled; dispatching trusted click', submitPoint);
       await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x: point.x,
-        y: point.y,
-        button: 'left',
-        clickCount: 1,
+        type: 'mouseMoved', x: submitPoint.x, y: submitPoint.y,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mousePressed', x: submitPoint.x, y: submitPoint.y,
+        button: 'left', clickCount: 1,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mouseReleased', x: submitPoint.x, y: submitPoint.y,
+        button: 'left', clickCount: 1,
       });
     } catch (error: any) {
       const details = {
@@ -502,9 +548,9 @@ async function processQueue() {
         data: error?.data ?? null,
         stack: error?.stack ?? null,
       };
-      console.error('[CDP] trusted click failed at ' + debuggerStep, details);
+      console.error('[CDP] trusted input/click failed at ' + debuggerStep, details);
       throw new Error(
-        'Trusted click failed at ' + debuggerStep + ': ' + JSON.stringify(details)
+        'Trusted input/click failed at ' + debuggerStep + ': ' + JSON.stringify(details)
       );
     } finally {
       if (debuggerAttached) {
@@ -513,7 +559,7 @@ async function processQueue() {
     }
 
     console.log(
-      `[INJECT] scene ${nextPending.scene_number}: trusted click dispatched to Flow submit button`
+      `[INJECT] scene ${nextPending.scene_number}: trusted keyboard input and submit click dispatched to Flow`
     );
 
     // Keep generations sequential to avoid duplicate requests and Flow rate limits.
