@@ -7,6 +7,6 @@ export default defineConfig({
     name: 'Flow Image Generator',
     version: '1.0.0',
     description: 'Generate images in Google Flow from scene prompts and automatically organize downloads.',
-    permissions: ['scripting', 'activeTab', 'downloads']
+    permissions: ['scripting', 'activeTab', 'downloads', 'debugger']
   }
 });
