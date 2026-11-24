@@ -168,12 +168,14 @@ async function initializeKnownIdsAndStart(tabId: number) {
     const initialResults = await chrome.scripting.executeScript({
       target: { tabId },
       func: () =>
-        Array.from(document.querySelectorAll('[data-tile-id]'))
-          .filter(t => {
-            const img = t.querySelector('img') as HTMLImageElement;
-            return img && img.src && !img.src.includes('data:image');
+        Array.from(document.querySelectorAll('flow-image-tile, [data-tile-id]'))
+          .map(tile => {
+            const img = tile.querySelector('img') as HTMLImageElement | null;
+            const src = img?.currentSrc || img?.src;
+            if (!src || src.startsWith('data:')) return null;
+            return tile.getAttribute('data-media-id') || tile.getAttribute('data-tile-id') || src;
           })
-          .map(el => el.getAttribute('data-tile-id')),
+          .filter((id): id is string => Boolean(id)),
     });
 
     const initialIds = initialResults?.[0]?.result;
@@ -361,13 +363,14 @@ function startPollingIfNeeded() {
           const tiles: [string, string][] = [];
           const rateLimitTileIds: string[] = [];
 
-          document.querySelectorAll('[data-tile-id]').forEach(t => {
-            const id = t.getAttribute('data-tile-id');
+          document.querySelectorAll('flow-image-tile, [data-tile-id]').forEach(t => {
+            const img = t.querySelector('img') as HTMLImageElement | null;
+            const rawUrl = img?.currentSrc || img?.src;
+            const id = t.getAttribute('data-media-id') || t.getAttribute('data-tile-id') || rawUrl;
             if (!id) return;
 
-            const img = t.querySelector('img') as HTMLImageElement;
-            if (img?.src && !img.src.includes('data:image')) {
-              tiles.push([id, img.src.startsWith('/') ? location.origin + img.src : img.src]);
+            if (rawUrl && !rawUrl.startsWith('data:')) {
+              tiles.push([id, rawUrl.startsWith('/') ? location.origin + rawUrl : rawUrl]);
               return;
             }
 
