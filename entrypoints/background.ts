@@ -211,65 +211,90 @@ async function processQueue() {
   broadcastQueue();
 
   try {
-    await chrome.scripting.executeScript({
+    const injectionResults = await chrome.scripting.executeScript({
       target: { tabId: activeTabId },
       world: 'MAIN',
-      func: (promptText) => {
-        const editorDom = document.querySelector<HTMLElement>('[data-slate-editor="true"]');
-        if (!editorDom) return;
+      func: async (promptText) => {
+        // Flow's current generation composer is a ProseMirror textbox. The old
+        // data-slate-editor selector no longer exists on the current Flow UI.
+        const editorDom = document.querySelector<HTMLElement>(
+          '[role="textbox"][contenteditable="true"][aria-label="What do you want to create?"]'
+        );
+
+        if (!editorDom) {
+          return {
+            success: false,
+            error: 'Google Flow generation prompt editor was not found. Open a Flow project and make sure the "What do you want to create?" field is visible.',
+          };
+        }
+
         editorDom.focus();
 
-        const leaf = editorDom.querySelector('[data-slate-leaf="true"]') || editorDom;
-        const sel = window.getSelection();
+        const selection = window.getSelection();
         const range = document.createRange();
-        range.selectNodeContents(leaf);
+        range.selectNodeContents(editorDom);
         range.collapse(false);
-        if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+        selection?.removeAllRanges();
+        selection?.addRange(range);
 
-        const beforeInputEvent = new InputEvent('beforeinput', { inputType: 'insertText', data: promptText, bubbles: true, cancelable: true }) as any;
-        beforeInputEvent.getTargetRanges = () => [range];
+        const beforeInputEvent = new InputEvent('beforeinput', {
+          inputType: 'insertText',
+          data: promptText,
+          bubbles: true,
+          cancelable: true,
+        });
         editorDom.dispatchEvent(beforeInputEvent);
 
         if (!beforeInputEvent.defaultPrevented) {
           document.execCommand('insertText', false, promptText);
-          editorDom.dispatchEvent(new Event('input', { bubbles: true }));
+          editorDom.dispatchEvent(new InputEvent('input', {
+            inputType: 'insertText',
+            data: promptText,
+            bubbles: true,
+          }));
         }
 
-        setTimeout(() => {
-          const buttons = Array.from(document.querySelectorAll('button'));
-          const sendButton = buttons.find(b => {
-            const icon = b.querySelector('i.google-symbols');
-            return icon && icon.textContent?.trim() === 'arrow_forward';
-          });
+        // Allow Flow to update its composer state before submitting.
+        await new Promise(resolve => setTimeout(resolve, 800));
 
-          if (sendButton) {
-            sendButton.removeAttribute('disabled');
-            sendButton.removeAttribute('aria-disabled');
-            sendButton.style.pointerEvents = 'auto';
-            sendButton.click();
+        const sendButton = Array.from(document.querySelectorAll('button')).find(button => {
+          const icon = button.querySelector('i.google-symbols');
+          return icon?.textContent?.trim() === 'arrow_forward';
+        });
 
-            const btnReactKey = Object.keys(sendButton).find(k => k.startsWith('__reactProps$'));
-            if (btnReactKey) {
-              const props = (sendButton as any)[btnReactKey];
-              if (props && typeof props.onClick === 'function') {
-                try { props.onClick({ preventDefault: () => {}, stopPropagation: () => {}, nativeEvent: { isTrusted: true } }); } catch {}
-              }
-            }
-          }
+        if (sendButton) {
+          sendButton.click();
+        } else {
+          // Keyboard submission is a fallback for Flow layouts without the
+          // recognizable arrow_forward button.
+          editorDom.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter',
+            code: 'Enter',
+            keyCode: 13,
+            which: 13,
+            bubbles: true,
+            cancelable: true,
+          }));
+        }
 
-          editorDom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
-
-          const editorReactKey = Object.keys(editorDom).find(k => k.startsWith('__reactProps$'));
-          if (editorReactKey) {
-            const props = (editorDom as any)[editorReactKey];
-            if (props && typeof props.onKeyDown === 'function') {
-              try { props.onKeyDown({ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, preventDefault: () => {}, stopPropagation: () => {}, nativeEvent: { isTrusted: true } }); } catch {}
-            }
-          }
-        }, 800);
+        return { success: true, submittedWithButton: Boolean(sendButton) };
       },
       args: [nextPending.prompt],
     });
+
+    const injectionResult = injectionResults?.[0]?.result as
+      | { success?: boolean; error?: string; submittedWithButton?: boolean }
+      | undefined;
+
+    if (!injectionResult?.success) {
+      throw new Error(
+        injectionResult?.error ?? 'Google Flow prompt injection did not complete.'
+      );
+    }
+
+    console.log(
+      `[INJECT] scene ${nextPending.scene_number} prompt inserted; submit button: ${injectionResult.submittedWithButton ? 'found' : 'keyboard fallback'}`
+    );
 
     // Keep generations sequential to avoid duplicate requests and Flow rate limits.
     await new Promise(r => setTimeout(r, INJECT_DELAY_MS));
