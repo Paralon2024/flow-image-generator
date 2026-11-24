@@ -19,24 +19,6 @@ const mediaIdToScene = new Map<string, { sceneNumber: number; imageIndex: number
 export default defineBackground(() => {
   console.log('Flow Background Queue Orchestrator Started');
 
-  // Register the MAIN-world injector script (WXT doesn't add it to the manifest automatically)
-  chrome.scripting.registerContentScripts([{
-    id: 'flow-injector',
-    matches: ['*://*.google.com/*', '*://labs.google/*'],
-    js: ['injector.js'],
-    world: 'MAIN',
-    runAt: 'document_start',
-  }]).catch(() => {
-    // Already registered from a previous session — update it
-    chrome.scripting.updateContentScripts([{
-      id: 'flow-injector',
-      matches: ['*://*.google.com/*', '*://labs.google/*'],
-      js: ['injector.js'],
-      world: 'MAIN',
-      runAt: 'document_start',
-    }]).catch(e => console.error('[INJECTOR] update failed:', e));
-  });
-
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'GET_QUEUE') {
       sendResponse({ queue });
@@ -64,6 +46,15 @@ export default defineBackground(() => {
     if (message.type === 'CLEAR_QUEUE') {
       queue = [];
       mediaIdToScene.clear();
+      downloadedTileIds.clear();
+      isInitialized = false;
+      isInjecting = false;
+      rateLimitCooldownUntil = 0;
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+      }
+      activeTabId = null;
       broadcastQueue();
       sendResponse({ success: true });
       return true;
@@ -140,15 +131,15 @@ function handleBatchResponse(raw: any) {
       console.log(`  [BATCH] matched → scene ${target.scene_number}`);
 
       // Count images already mapped for this scene to assign the correct imageIndex
-      const alreadyMapped = [...mediaIdToScene.values()]
-        .filter(v => v.sceneNumber === target.scene_number).length;
+      let nextImageIndex = [...mediaIdToScene.values()]
+        .filter(v => v.sceneNumber === target.scene_number).length + 1;
 
-      batchMedia.forEach((m: any, idx: number) => {
+      batchMedia.forEach((m: any) => {
         const mediaId: string | undefined = m?.image?.generatedImage?.mediaId ?? m?.name;
         if (mediaId && !mediaIdToScene.has(mediaId)) {
-          const imageIndex = alreadyMapped + idx + 1;
-          mediaIdToScene.set(mediaId, { sceneNumber: target.scene_number, imageIndex });
-          console.log(`    mapped mediaId ${mediaId} → scene ${target.scene_number} img ${imageIndex}`);
+          mediaIdToScene.set(mediaId, { sceneNumber: target.scene_number, imageIndex: nextImageIndex });
+          console.log(`    mapped mediaId ${mediaId} → scene ${target.scene_number} img ${nextImageIndex}`);
+          nextImageIndex += 1;
         }
       });
     }
@@ -174,7 +165,7 @@ async function initializeKnownIdsAndStart(tabId: number) {
   isInitialized = true;
 
   try {
-    const [{ result: initialIds }] = await chrome.scripting.executeScript({
+    const initialResults = await chrome.scripting.executeScript({
       target: { tabId },
       func: () =>
         Array.from(document.querySelectorAll('[data-tile-id]'))
@@ -185,7 +176,8 @@ async function initializeKnownIdsAndStart(tabId: number) {
           .map(el => el.getAttribute('data-tile-id')),
     });
 
-    if (initialIds) {
+    const initialIds = initialResults?.[0]?.result;
+    if (Array.isArray(initialIds)) {
       initialIds.forEach((id: string | null) => { if (id) downloadedTileIds.add(id); });
     }
   } catch (e) {
@@ -198,7 +190,7 @@ async function initializeKnownIdsAndStart(tabId: number) {
 
 async function processQueue() {
   if (isInjecting) return;
-  if (!activeTabId) return;
+  if (activeTabId === null) return;
 
   // Respect rate limit cooldown
   const now = Date.now();
@@ -279,8 +271,8 @@ async function processQueue() {
       args: [nextPending.prompt],
     });
 
-    // Small buffer after injection before allowing another one
-    await new Promise(r => setTimeout(r, 2000));
+    // Keep generations sequential to avoid duplicate requests and Flow rate limits.
+    await new Promise(r => setTimeout(r, INJECT_DELAY_MS));
   } catch (e) {
     console.error('[INJECT] error', e);
     nextPending.status = 'ERROR';
@@ -294,7 +286,7 @@ async function processQueue() {
 
 function startPollingIfNeeded() {
   if (pollingInterval) return;
-  if (!activeTabId) return;
+  if (activeTabId === null) return;
 
   pollingInterval = setInterval(async () => {
     const inProgressCount = queue.filter(q => q.status === 'IN_PROGRESS').length;
@@ -304,10 +296,10 @@ function startPollingIfNeeded() {
       return;
     }
 
-    if (!activeTabId) return;
+    if (activeTabId === null) return;
 
     try {
-      const [{ result: scanResult }] = await chrome.scripting.executeScript({
+      const scanResults = await chrome.scripting.executeScript({
         target: { tabId: activeTabId },
         func: () => {
           const tiles: [string, string][] = [];
@@ -333,6 +325,11 @@ function startPollingIfNeeded() {
         },
       });
 
+      const scanResult = scanResults?.[0]?.result;
+      if (!scanResult || !Array.isArray(scanResult.tiles) || !Array.isArray(scanResult.rateLimitTileIds)) {
+        console.warn('[POLL] Flow tab returned no tile scan result.');
+        return;
+      }
       const { tiles: currentTiles, rateLimitTileIds } = scanResult as {
         tiles: [string, string][];
         rateLimitTileIds: string[];
@@ -376,7 +373,9 @@ function startPollingIfNeeded() {
         if (downloadedTileIds.has(tileId)) continue;
         if (uuidFromUrl && downloadedTileIds.has(uuidFromUrl)) continue;
 
-        const mapping = uuidFromUrl ? mediaIdToScene.get(uuidFromUrl) : undefined;
+        // Flow may expose the generated media ID as the tile ID rather than the URL UUID.
+        const mapping = (uuidFromUrl ? mediaIdToScene.get(uuidFromUrl) : undefined)
+          ?? mediaIdToScene.get(tileId);
 
         if (!mapping) {
           console.log(`[POLL] tile ${tileId} | imgSrc: ${imgUrl.slice(0, 100)} | urlUuid: ${uuidFromUrl ?? 'none'} | no mapping yet, waiting`);
