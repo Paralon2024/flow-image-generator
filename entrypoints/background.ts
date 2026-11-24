@@ -217,17 +217,28 @@ async function processQueue() {
       target: { tabId: activeTabId },
       world: 'MAIN',
       func: async (promptText) => {
-        const composer = document.querySelector<HTMLElement>('flow-base-prompt-box');
-        const editorDom = composer?.querySelector<HTMLElement>(
-          '.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror'
-        ) ?? composer?.querySelector<HTMLElement>(
-          '[role="textbox"][contenteditable="true"][aria-label="Describe your goal"]'
-        );
+        const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+        let composer: HTMLElement | null = null;
+        let editorDom: HTMLElement | null = null;
+
+        // Flow can take several seconds to load after opening the Labs entry point.
+        // Wait for the project composer instead of failing immediately on the landing page.
+        for (let elapsed = 0; elapsed < 45_000; elapsed += 1_000) {
+          composer = document.querySelector<HTMLElement>('flow-base-prompt-box');
+          editorDom = composer?.querySelector<HTMLElement>(
+            '.prosemirror-editor [role="textbox"][contenteditable="true"].ProseMirror'
+          ) ?? composer?.querySelector<HTMLElement>(
+            '[role="textbox"][contenteditable="true"][aria-label="Describe your goal"]'
+          ) ?? null;
+
+          if (composer && editorDom) break;
+          await wait(1_000);
+        }
 
         if (!composer || !editorDom) {
           return {
             success: false,
-            error: 'Google Flow composer not found. Open a Flow project and make sure the "Describe your goal" prompt field is visible.',
+            error: 'Google Flow project is not ready. Open or create a project at labs.google/fx/flow, wait until the "Describe your goal" field is visible, then start the queue again.',
           };
         }
 
@@ -266,7 +277,6 @@ async function processQueue() {
           };
         }
 
-        const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
         let sendButton = composer.querySelector<HTMLButtonElement>(
           'button[aria-label="Start generation"]'
         );
