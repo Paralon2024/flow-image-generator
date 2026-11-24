@@ -397,9 +397,25 @@ async function processQueue() {
           return { success: false, error: 'Prompt text was not inserted into the Flow editor. The queue was stopped to prevent losing this scene.' };
         }
 
+        // Flow's prompt editor listens for Enter. Send a complete key sequence first,
+        // then fall back to the real Generate/Send button if Enter does not submit.
+        const dispatchEnter = async () => {
+          editorDom.focus();
+          const keyboardInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+          editorDom.dispatchEvent(new KeyboardEvent('keydown', keyboardInit));
+          editorDom.dispatchEvent(new KeyboardEvent('keypress', keyboardInit));
+          editorDom.dispatchEvent(new KeyboardEvent('keyup', { ...keyboardInit, cancelable: false }));
+          await wait(900);
+          const currentText = normalize(editorDom.innerText || editorDom.textContent || '');
+          return !currentText || !currentText.includes(expected);
+        };
+        if (await dispatchEnter()) {
+          return { success: true, submittedWithEnter: true, attempts: 1 };
+        }
+
         const sendSelectors = shouldUseAgent
           ? ["button:has(mat-icon:text-is('arrow_forward'))", 'flow-generate-icon-button button', 'button[aria-label="Send"]', 'button[aria-label="Generate image"]']
-          : ['button[aria-label="Start generation"]', 'flow-generate-icon-button button'];
+          : ['button[aria-label="Start generation"]', 'button[aria-label*="Generate"]', 'flow-generate-icon-button button'];
         let sendButton: HTMLButtonElement | null = null;
         for (const selector of sendSelectors) {
           sendButton = composer.querySelector<HTMLButtonElement>(selector);
@@ -442,7 +458,7 @@ async function processQueue() {
     });
 
     const injectionResult = injectionResults?.[0]?.result as
-      | { success?: boolean; error?: string; submittedWithButton?: boolean; attempts?: number }
+      | { success?: boolean; error?: string; submittedWithButton?: boolean; submittedWithEnter?: boolean; attempts?: number }
       | undefined;
 
     if (!injectionResult?.success) {
@@ -452,7 +468,7 @@ async function processQueue() {
     }
 
     console.log(
-      `[INJECT] scene ${nextPending.scene_number} submitted via Start generation (attempt ${injectionResult.attempts ?? 1})`
+      `[INJECT] scene ${nextPending.scene_number} submitted via ${injectionResult.submittedWithEnter ? 'Enter' : 'Generate button'} (attempt ${injectionResult.attempts ?? 1})`
     );
 
     // Keep generations sequential to avoid duplicate requests and Flow rate limits.
