@@ -146,6 +146,17 @@ function handleBatchResponse(raw: any) {
           nextImageIndex += 1;
         }
       });
+
+      // Generation completion is independent from downloading. Once Flow has
+      // returned the expected media IDs, release the next prompt in the queue.
+      const generatedCount = [...mediaIdToScene.values()]
+        .filter(v => v.sceneNumber === target.scene_number).length;
+      if (generatedCount >= IMAGES_PER_SCENE && target.status === 'IN_PROGRESS') {
+        target.status = 'GENERATED';
+        console.log(`[QUEUE] scene ${target.scene_number} generation finished (${generatedCount} media items); advancing queue`);
+        broadcastQueue();
+        processQueue();
+      }
     }
 
     broadcastQueue();
@@ -683,8 +694,9 @@ async function processQueue() {
   } finally {
     isInjecting = false;
     broadcastQueue();
-    // Do NOT call processQueue() here — next injection happens only after
-    // the current scene's images are confirmed downloaded in the UI (DOWNLOADED status)
+    // Continue the queue after the injection lock is released. Generation completion
+    // is handled separately by the batch response; downloads do not block generation.
+    processQueue();
   }
 }
 
@@ -693,7 +705,7 @@ function startPollingIfNeeded() {
   if (activeTabId === null) return;
 
   pollingInterval = setInterval(async () => {
-    const inProgressCount = queue.filter(q => q.status === 'IN_PROGRESS').length;
+    const inProgressCount = queue.filter(q => q.status === 'IN_PROGRESS' || q.status === 'GENERATED').length;
     if (inProgressCount === 0) {
       clearInterval(pollingInterval);
       pollingInterval = null;
@@ -799,7 +811,7 @@ function startPollingIfNeeded() {
 
         console.log(`[DOWNLOAD] scene ${mapping.sceneNumber} img ${mapping.imageIndex} (tileId: ${tileId} | urlUuid: ${uuidFromUrl})`);
 
-        const sceneItem = queue.find(q => q.scene_number === mapping.sceneNumber && q.status === 'IN_PROGRESS');
+        const sceneItem = queue.find(q => q.scene_number === mapping.sceneNumber && (q.status === 'IN_PROGRESS' || q.status === 'GENERATED'));
         if (sceneItem) {
           const sceneMediaIds = [...mediaIdToScene.entries()]
             .filter(([, v]) => v.sceneNumber === mapping.sceneNumber)
