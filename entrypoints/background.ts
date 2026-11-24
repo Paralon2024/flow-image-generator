@@ -800,8 +800,11 @@ function startPollingIfNeeded() {
         if (!mapping) {
           const activeScene = queue.find(q => q.status === 'IN_PROGRESS');
           if (activeScene) {
-            const existingForScene = [...mediaIdToScene.values()]
-              .filter(v => v.sceneNumber === activeScene.scene_number).length;
+            const existingForScene = new Set(
+              [...mediaIdToScene.values()]
+                .filter(v => v.sceneNumber === activeScene.scene_number)
+                .map(v => v.imageIndex)
+            ).size;
             mapping = {
               sceneNumber: activeScene.scene_number,
               imageIndex: existingForScene + 1,
@@ -810,8 +813,11 @@ function startPollingIfNeeded() {
             if (uuidFromUrl) mediaIdToScene.set(uuidFromUrl, mapping);
             console.log(`[POLL] DOM fallback mapped new tile ${tileId} → scene ${mapping.sceneNumber} img ${mapping.imageIndex}`);
 
-            const generatedCount = [...mediaIdToScene.values()]
-              .filter(v => v.sceneNumber === activeScene.scene_number).length;
+            const generatedCount = new Set(
+              [...mediaIdToScene.values()]
+                .filter(v => v.sceneNumber === activeScene.scene_number)
+                .map(v => v.imageIndex)
+            ).size;
             if (generatedCount >= IMAGES_PER_SCENE && activeScene.status === 'IN_PROGRESS') {
               activeScene.status = 'GENERATED';
               console.log(`[QUEUE] scene ${activeScene.scene_number} generation detected from Flow DOM (${generatedCount} media items); advancing queue`);
