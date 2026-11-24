@@ -397,68 +397,53 @@ async function processQueue() {
           return { success: false, error: 'Prompt text was not inserted into the Flow editor. The queue was stopped to prevent losing this scene.' };
         }
 
-        // Flow's prompt editor listens for Enter. Send a complete key sequence first,
-        // then fall back to the real Generate/Send button if Enter does not submit.
-        const dispatchEnter = async () => {
-          editorDom.focus();
-          const keyboardInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
-          editorDom.dispatchEvent(new KeyboardEvent('keydown', keyboardInit));
-          editorDom.dispatchEvent(new KeyboardEvent('keypress', keyboardInit));
-          editorDom.dispatchEvent(new KeyboardEvent('keyup', { ...keyboardInit, cancelable: false }));
-          await wait(900);
-          const currentText = normalize(editorDom.innerText || editorDom.textContent || '');
-          return !currentText || !currentText.includes(expected);
-        };
-        if (await dispatchEnter()) {
-          return { success: true, submittedWithEnter: true, attempts: 1 };
-        }
-
+        // Flow uses a ProseMirror editor and an Angular-owned Generate button.
+        // Return the visible button's viewport coordinates; the extension worker
+        // activates it with Chrome DevTools Protocol trusted pointer input.
         const sendSelectors = shouldUseAgent
           ? ["button:has(mat-icon:text-is('arrow_forward'))", 'flow-generate-icon-button button', 'button[aria-label="Send"]', 'button[aria-label="Generate image"]']
-          : ['button[aria-label="Start generation"]', 'button[aria-label*="Generate"]', 'flow-generate-icon-button button'];
+          : ['button[aria-label="Start generation"]', 'flow-generate-icon-button button'];
         let sendButton: HTMLButtonElement | null = null;
         for (const selector of sendSelectors) {
-          sendButton = composer.querySelector<HTMLButtonElement>(selector);
-          if (sendButton) break;
+          const candidate = composer.querySelector<HTMLButtonElement>(selector);
+          if (candidate && visible(candidate)) {
+            sendButton = candidate;
+            break;
+          }
         }
         if (!sendButton) {
           return {
             success: false,
             error: shouldUseAgent
-              ? 'Agent prompt was inserted, but its submit button was not found.'
-              : 'Flow prompt was inserted, but the Start generation button was not found.',
+              ? 'Agent prompt was inserted, but its visible Send button was not found.'
+              : 'Prompt was inserted, but Flow\'s visible Start generation button was not found.',
+          };
+        }
+        if (sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') {
+          return {
+            success: false,
+            error: 'Flow\'s submit button is disabled after prompt insertion. No click was sent.',
           };
         }
 
-        for (let attempt = 1; attempt <= 4; attempt += 1) {
-          sendButton = null;
-          for (const selector of sendSelectors) {
-            sendButton = composer.querySelector<HTMLButtonElement>(selector);
-            if (sendButton) break;
-          }
-          if (!sendButton) break;
-          if (sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') {
-            await wait(700);
-            continue;
-          }
-          sendButton.click();
-          await wait(1400);
-          const remaining = normalize(editorDom.innerText || editorDom.textContent || '');
-          if (!remaining || !remaining.includes(expected) ||
-              sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') {
-            return { success: true, submittedWithButton: true, attempts: attempt };
-          }
+        const rect = sendButton.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          return { success: false, error: 'Flow\'s submit button has no visible clickable area.' };
         }
+
         return {
-          success: false,
-          error: 'Flow kept the prompt in the editor after four send attempts. Check the Flow page before retrying.',
-        };
-      },
+          success: true,
+          awaitingTrustedClick: true,
+          clickPoint: {
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+          },
+        };      },
       args: [nextPending.prompt, activeGenerationMode, activeImageModel],
     });
 
     const injectionResult = injectionResults?.[0]?.result as
-      | { success?: boolean; error?: string; submittedWithButton?: boolean; submittedWithEnter?: boolean; attempts?: number }
+      | { success?: boolean; error?: string; awaitingTrustedClick?: boolean; clickPoint?: { x: number; y: number } }
       | undefined;
 
     if (!injectionResult?.success) {
@@ -467,8 +452,50 @@ async function processQueue() {
       );
     }
 
+    if (!injectionResult.awaitingTrustedClick || !injectionResult.clickPoint) {
+      throw new Error('Flow did not return a valid submit-button target.');
+    }
+
+    const submitTabId = activeTabId;
+    if (submitTabId === null) throw new Error('The Google Flow tab is no longer available.');
+    const debuggee: chrome.debugger.Debuggee = { tabId: submitTabId };
+    let debuggerAttached = false;
+    try {
+      await chrome.debugger.attach(debuggee, '1.3');
+      debuggerAttached = true;
+      const point = injectionResult.clickPoint;
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: point.x,
+        y: point.y,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: point.x,
+        y: point.y,
+        button: 'left',
+        clickCount: 1,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: point.x,
+        y: point.y,
+        button: 'left',
+        clickCount: 1,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        'Could not send trusted input to Google Flow. Close DevTools for the Flow tab and retry. ' + detail
+      );
+    } finally {
+      if (debuggerAttached) {
+        await chrome.debugger.detach(debuggee).catch(() => {});
+      }
+    }
+
     console.log(
-      `[INJECT] scene ${nextPending.scene_number} submitted via ${injectionResult.submittedWithEnter ? 'Enter' : 'Generate button'} (attempt ${injectionResult.attempts ?? 1})`
+      `[INJECT] scene ${nextPending.scene_number}: trusted click dispatched to Flow submit button`
     );
 
     // Keep generations sequential to avoid duplicate requests and Flow rate limits.
