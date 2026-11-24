@@ -460,15 +460,23 @@ async function processQueue() {
     if (submitTabId === null) throw new Error('The Google Flow tab is no longer available.');
     const debuggee: chrome.debugger.Debuggee = { tabId: submitTabId };
     let debuggerAttached = false;
+    let debuggerStep = 'chrome.debugger.attach';
     try {
+      console.log('[CDP] attaching debugger to Flow tab', submitTabId);
       await chrome.debugger.attach(debuggee, '1.3');
       debuggerAttached = true;
       const point = injectionResult.clickPoint;
+
+      debuggerStep = 'Input.dispatchMouseEvent mouseMoved';
+      console.log('[CDP] dispatching mouseMoved', point);
       await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
         type: 'mouseMoved',
         x: point.x,
         y: point.y,
       });
+
+      debuggerStep = 'Input.dispatchMouseEvent mousePressed';
+      console.log('[CDP] dispatching mousePressed', point);
       await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
         type: 'mousePressed',
         x: point.x,
@@ -476,6 +484,9 @@ async function processQueue() {
         button: 'left',
         clickCount: 1,
       });
+
+      debuggerStep = 'Input.dispatchMouseEvent mouseReleased';
+      console.log('[CDP] dispatching mouseReleased', point);
       await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
         type: 'mouseReleased',
         x: point.x,
@@ -483,10 +494,17 @@ async function processQueue() {
         button: 'left',
         clickCount: 1,
       });
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+    } catch (error: any) {
+      const details = {
+        name: error?.name ?? null,
+        message: error?.message ?? String(error),
+        code: error?.code ?? null,
+        data: error?.data ?? null,
+        stack: error?.stack ?? null,
+      };
+      console.error('[CDP] trusted click failed at ' + debuggerStep, details);
       throw new Error(
-        'Could not send trusted input to Google Flow. Close DevTools for the Flow tab and retry. ' + detail
+        'Trusted click failed at ' + debuggerStep + ': ' + JSON.stringify(details)
       );
     } finally {
       if (debuggerAttached) {
