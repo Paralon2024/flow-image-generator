@@ -77,8 +77,18 @@ function App() {
     setError('');
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id || !tab.url || !tab.url.startsWith('https://labs.google/')) {
-        setError('Abre Google Flow en labs.google antes de iniciar la generación.');
+      const labsFlowUrl = 'https://labs.google/fx/flow';
+      const isLabsFlow = Boolean(tab?.url && /^https:\/\/labs\.google\/fx\/flow(?:\/|$)/i.test(tab.url));
+      const isMigratedFlow = Boolean(tab?.url && /^https:\/\/flow\.google\.com\//i.test(tab.url));
+
+      if (!tab?.id) {
+        setError('Open Google Flow in a browser tab before starting generation.');
+        return;
+      }
+
+      if (!isLabsFlow && !isMigratedFlow) {
+        await chrome.tabs.update(tab.id, { url: labsFlowUrl });
+        setError('Google Flow has been opened. Open an existing project or create a new project, then click Start Generation again.');
         return;
       }
 
