@@ -10,6 +10,9 @@ function App() {
   const [error, setError] = useState('');
   const [parsedScenes, setParsedScenes] = useState<{scene_number: number, prompt: string}[]>([]);
   const [fileName, setFileName] = useState<string>('');
+  const [generationMode, setGenerationMode] = useState<'agent' | 'standard'>('standard');
+  const [imageModel, setImageModel] = useState<'nano-banana-pro' | 'nano-banana-2' | 'nano-banana-2-lite'>('nano-banana-pro');
+  const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
     browser.runtime.sendMessage({ type: 'GET_QUEUE' }).then(res => {
@@ -75,6 +78,7 @@ function App() {
     }
 
     setError('');
+    setIsStarting(true);
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const labsFlowUrl = 'https://labs.google/fx/tools/flow';
@@ -95,7 +99,9 @@ function App() {
       await browser.runtime.sendMessage({
         type: 'START_QUEUE',
         prompts: parsedScenes,
-        tabId: tab.id
+        tabId: tab.id,
+        generationMode,
+        imageModel
       });
       
       setParsedScenes([]);
@@ -103,7 +109,9 @@ function App() {
       // Reset input file value if needed, but react handles it okay if re-mounted
     } catch (err) {
       console.error(err);
-      setError('Error al comunicar con la extensión.');
+      setError(err instanceof Error ? err.message : 'Error al comunicar con la extensión.');
+    } finally {
+      setIsStarting(false);
     }
   };
 
@@ -143,6 +151,29 @@ function App() {
         <h2 style={{ margin: 0, fontSize: '18px', color: '#1a73e8' }}>Flow Script Processor</h2>
       </div>
       
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#5f6368', fontWeight: 600 }}>
+          Generation mode
+          <select value={generationMode} onChange={e => setGenerationMode(e.target.value as 'agent' | 'standard')} style={{ padding: '9px 10px', border: '1px solid #dadce0', borderRadius: '8px', background: '#fff', color: '#202124' }}>
+            <option value="standard">Without Flow Agent</option>
+            <option value="agent">Flow Agent</option>
+          </select>
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#5f6368', fontWeight: 600 }}>
+          Nano Banana model
+          <select value={imageModel} onChange={e => setImageModel(e.target.value as typeof imageModel)} disabled={generationMode === 'agent'} style={{ padding: '9px 10px', border: '1px solid #dadce0', borderRadius: '8px', background: generationMode === 'agent' ? '#f1f3f4' : '#fff', color: '#202124' }}>
+            <option value="nano-banana-pro">Nano Banana Pro</option>
+            <option value="nano-banana-2">Nano Banana 2.1</option>
+            <option value="nano-banana-2-lite">Nano Banana 2 Lite</option>
+          </select>
+        </label>
+      </div>
+      <p style={{ margin: '-6px 0 0', fontSize: '11px', color: '#5f6368' }}>
+        {generationMode === 'agent'
+          ? 'Flow Agent chooses the image model automatically. The model selector is used in standard mode.'
+          : 'The extension applies the selected Nano Banana model in Flow before each scene.'}
+      </p>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px dashed #dadce0' }}>
         <p style={{ margin: 0, fontSize: '12px', color: '#5f6368', fontWeight: '500' }}>
           1. Sube tu archivo script.json
@@ -163,20 +194,20 @@ function App() {
         <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
           <button 
             onClick={handleStartQueue}
-            disabled={parsedScenes.length === 0}
+            disabled={parsedScenes.length === 0 || isStarting}
             style={{
               flex: 1,
-              backgroundColor: parsedScenes.length === 0 ? '#dadce0' : '#1a73e8',
+              backgroundColor: parsedScenes.length === 0 || isStarting ? '#dadce0' : '#1a73e8',
               color: parsedScenes.length === 0 ? '#5f6368' : 'white',
               border: 'none',
               padding: '10px 16px',
               borderRadius: '20px',
-              cursor: parsedScenes.length === 0 ? 'not-allowed' : 'pointer',
+              cursor: parsedScenes.length === 0 || isStarting ? 'not-allowed' : 'pointer',
               fontWeight: '500',
               transition: 'background-color 0.2s'
             }}
           >
-            Iniciar Generación
+            {isStarting ? 'Starting…' : 'Start Generation'}
           </button>
           
           <button 
