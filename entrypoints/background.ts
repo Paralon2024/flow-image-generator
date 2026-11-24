@@ -364,7 +364,10 @@ async function processQueue() {
           const refreshedSettings = document.querySelector<HTMLElement>(
             'flow-prompt-box-settings, flow-settings-view'
           );
-          const selectedTrigger = refreshedSettings?.querySelector<HTMLButtonElement>(\n              'button:has(span.model-select-trigger-content), button.image-model-picker-button'\n            );\n            const selectedModel = normalize(selectedTrigger?.textContent || '');
+          const selectedTrigger = refreshedSettings?.querySelector<HTMLButtonElement>(
+              'button:has(span.model-select-trigger-content), button.image-model-picker-button'
+            );
+            const selectedModel = normalize(selectedTrigger?.textContent || '');
           if (!requestedModels.some(name => selectedModel.toLowerCase().includes(name.toLowerCase()))) {
             return { success: false, error: 'Google Flow did not confirm the selected model (' + requestedModels.join(' / ') + '). No prompt was submitted.' };
           }
