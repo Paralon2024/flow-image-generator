@@ -228,7 +228,7 @@ async function processQueue() {
           return style.display !== 'none' && style.visibility !== 'hidden' &&
             (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
         };
-        const normalize = (value: string) => value.replace(/\\s+/g, ' ').trim();
+        const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
         const closeAgentPanel = async () => {
           const panel = document.querySelector<HTMLElement>('flow-agent-panel');
           if (!panel || !visible(panel)) return;
