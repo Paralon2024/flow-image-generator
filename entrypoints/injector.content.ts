@@ -1,70 +1,73 @@
 export default defineContentScript({
-  registration: 'runtime',
-  matches: ['*://*.google.com/*', '*://labs.google/*'],
+  // Keep this as a statically registered MAIN-world content script. The queue
+  // injects prompts from the background worker; the interceptor observes the
+  // same page requests and forwards media metadata through content.ts.
+  matches: ['https://labs.google/*', 'https://flow.google.com/*'],
   world: 'MAIN',
   runAt: 'document_start',
   main() {
     console.log('[FLOW-EXT] Injector running in MAIN world — installing fetch/XHR interceptors');
 
-    // --- Fetch interceptor ---
-    const _originalFetch = window.fetch;
-    window.fetch = async function (...args: Parameters<typeof fetch>) {
-      const url = typeof args[0] === 'string' ? args[0] : (args[0] as Request)?.url ?? '';
+    const publishIfRelevant = (text: string) => {
+      if (!text.trim()) return;
 
-      // Log every fetch so we can confirm the interceptor is running
-      console.log('[FLOW-EXT] fetch:', url.slice(0, 120));
+      const publish = (data: unknown) => {
+        const serialized = JSON.stringify(data);
+        if (!serialized.includes('batchId') && !serialized.includes('mediaId') &&
+            !serialized.includes('workflows') && !serialized.includes('generatedImage')) return;
+        window.postMessage({ type: 'FLOW_BATCH_RESPONSE', data }, '*');
+      };
 
-      const response = await _originalFetch.apply(this, args);
-
-      // Intercept tRPC calls on labs.google that may contain batch/media generation info
-      if (url.includes('/fx/api/trpc/') || url.includes('batchGenerateImages')) {
-        response.clone().text().then((text: string) => {
-          if (!text.includes('batchId') && !text.includes('mediaId')) return;
-          console.log('[FLOW-EXT] response with batch/media info from:', url.slice(0, 120));
-          console.log('[FLOW-EXT] response body (first 500):', text.slice(0, 500));
-          // Try flat JSON first, then NDJSON
-          try {
-            const data = JSON.parse(text);
-            window.postMessage({ type: 'FLOW_BATCH_RESPONSE', data }, '*');
-          } catch {
-            text.split('\n').filter(l => l.trim()).forEach(line => {
-              try {
-                const data = JSON.parse(line);
-                if (JSON.stringify(data).includes('batchId')) {
-                  window.postMessage({ type: 'FLOW_BATCH_RESPONSE', data }, '*');
-                }
-              } catch {}
-            });
-          }
-        }).catch(() => {});
+      try {
+        publish(JSON.parse(text));
+        return;
+      } catch {
+        // Some Flow endpoints stream newline-delimited JSON.
       }
 
+      for (const line of text.split('\n').filter(value => value.trim())) {
+        try {
+          publish(JSON.parse(line));
+        } catch {
+          // Ignore non-JSON stream fragments.
+        }
+      }
+    };
+
+    const originalFetch = window.fetch;
+    window.fetch = async function (...args: Parameters<typeof fetch>) {
+      const request = args[0];
+      const url = typeof request === 'string'
+        ? request
+        : request instanceof Request
+          ? request.url
+          : String(request ?? '');
+
+      const response = await originalFetch.apply(this, args);
+      if (url.includes('/fx/api/trpc/') || url.includes('batchGenerateImages')) {
+        response.clone().text().then(publishIfRelevant).catch(error => {
+          console.warn('[FLOW-EXT] Could not inspect Flow fetch response:', error);
+        });
+      }
       return response;
     };
 
-    // --- XHR interceptor ---
-    const _originalOpen = XMLHttpRequest.prototype.open;
-    const _originalSend = XMLHttpRequest.prototype.send;
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
 
-    XMLHttpRequest.prototype.open = function (method: string, url: string, ...rest: any[]) {
-      (this as any)._flowUrl = url;
-      return _originalOpen.apply(this, [method, url, ...rest] as any);
+    XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: any[]) {
+      (this as XMLHttpRequest & { _flowUrl?: string })._flowUrl = String(url);
+      return originalOpen.apply(this, [method, url, ...rest] as any);
     };
 
     XMLHttpRequest.prototype.send = function (...args: any[]) {
-      if ((this as any)._flowUrl?.includes('batchGenerateImages')) {
-        console.log('[FLOW-EXT] batchGenerateImages XHR detected:', (this as any)._flowUrl);
+      const url = (this as XMLHttpRequest & { _flowUrl?: string })._flowUrl ?? '';
+      if (url.includes('/fx/api/trpc/') || url.includes('batchGenerateImages')) {
         this.addEventListener('load', function (this: XMLHttpRequest) {
-          try {
-            const data = JSON.parse(this.responseText);
-            console.log('[FLOW-EXT] batchGenerateImages XHR response:', JSON.stringify(data).slice(0, 500));
-            window.postMessage({ type: 'FLOW_BATCH_RESPONSE', data }, '*');
-          } catch (e) {
-            console.warn('[FLOW-EXT] batchGenerateImages XHR response is not JSON:', e);
-          }
+          if (typeof this.responseText === 'string') publishIfRelevant(this.responseText);
         });
       }
-      return _originalSend.apply(this, args as [body?: Document | XMLHttpRequestBodyInit | null]);
+      return originalSend.apply(this, args as [body?: Document | XMLHttpRequestBodyInit | null]);
     };
 
     console.log('[FLOW-EXT] fetch/XHR interceptors installed');
